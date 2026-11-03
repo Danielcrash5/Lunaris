@@ -888,7 +888,7 @@ Example:
 local Player = require("Player")
 ```
 
-The Module Manager maintains:
+The Module Loader maintains:
 
 ```text
 Module Identifier
@@ -900,13 +900,50 @@ Module Cache
 Bytecode Cache
 ```
 
-Axiom can map:
+A single Luau `require(...)` entry point delegates to Lunaris' Module Loader.
+The loader resolves a requested name through configured module providers,
+canonicalizes the result to a module identifier, and uses that identifier for
+module caching and dependency tracking. Lunaris modules and LuaRocks packages
+share this entry point; a name that resolves to more than one provider is an
+error rather than silently shadowing one package.
+
+The generic provider interface must not depend on a physical filesystem or
+Axiom VFS. Axiom can map:
 
 ```text
 game://scripts/Player.luau
 ```
 
-to a canonical module identifier.
+to a canonical module identifier and provide the corresponding source.
+
+## 27.1 Optional LuaRocks Integration
+
+LuaRocks support is an optional build feature, controlled by
+`LUNARIS_ENABLE_LUAROCKS` and disabled by default. When disabled, the core
+Module Loader and Lunaris module providers remain available without LuaRocks
+discovery or loading code.
+
+When enabled, Lunaris can discover and load already-installed LuaRocks
+packages through the same `require(...)` entry point. The initial scope is
+loading installed package contents; downloading or installing rocks is not
+part of the runtime. LuaRocks metadata and module mappings are used only to the
+extent they can be resolved to supported Luau modules and native modules.
+Packages written for standard Lua are not presumed to be compatible with
+Luau.
+
+Native C modules are supported only when they are built for the supported
+Lunaris/Luau module ABI and platform. Lunaris must not assume that a native
+module built for an arbitrary Lua version or implementation is ABI-compatible
+with Luau. If a compatible ABI or module entry point is unavailable, loading
+must fail with a clear diagnostic rather than attempting an unsafe fallback.
+The loader must also report unsupported package metadata or dependencies
+instead of silently treating them as successfully loaded.
+
+Loading a native module executes arbitrary native code in the host process.
+It is a trusted-code feature, not a sandbox boundary: disabling OS libraries
+or restricting Luau script environments cannot make an untrusted native
+module safe. Applications are responsible for controlling which installed
+rocks are discoverable and loadable.
 
 ---
 
@@ -924,7 +961,7 @@ or reloaded:
 lua.modules().reload("Player");
 ```
 
-The Module Manager can maintain a dependency graph:
+The Module Loader can maintain a dependency graph:
 
 ```text
 Game
@@ -936,7 +973,7 @@ Game
     └── Item
 ```
 
-Dependency tracking belongs to the Module Manager, not the Bytecode Cache.
+Dependency tracking belongs to the Module Loader, not the Bytecode Cache.
 
 ---
 
@@ -1707,12 +1744,17 @@ CMake options:
 option(LUNARIS_BUILD_TESTS "Build Lunaris tests" ON)
 option(LUNARIS_BUILD_EXAMPLES "Build Lunaris examples" ON)
 option(LUNARIS_BUILD_BENCHMARKS "Build Lunaris benchmarks" OFF)
+option(LUNARIS_ENABLE_LUAROCKS "Enable LuaRocks module loading" OFF)
 
 if (LUNARIS_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
 ```
+
+The LuaRocks build option is off by default. Builds with it both enabled and
+disabled must be covered by CI. The disabled configuration must not discover,
+link, or load LuaRocks packages.
 
 Use `GoogleTest::gtest_main` and `gtest_discover_tests()` so tests are discoverable by CTest and IDEs. Pin the GoogleTest version. To keep normal builds reproducible and avoid requiring network access, the preferred default is a pinned source copy under `thirdparty/googletest/`; an opt-in `FetchContent` path may be offered for contributors who prefer downloading it during configuration. GoogleTest is a development-only dependency and must never become a public or runtime dependency of Lunaris.
 
