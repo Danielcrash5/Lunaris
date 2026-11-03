@@ -916,7 +916,50 @@ game://scripts/Player.luau
 
 to a canonical module identifier and provide the corresponding source.
 
-## 27.1 Optional LuaRocks Integration
+## 27.1 Module Search Paths and Catalog
+
+The Module Loader accepts a configurable base path and multiple additional
+search paths. Paths are provider-defined identifiers, not necessarily
+filesystem paths. For example:
+
+```text
+game://modules
+engine://modules/
+```
+
+For a `require("Player")` request, the loader asks the configured providers to
+resolve the name under every configured root. The base path is a convenient
+single-root configuration; additional roots allow modules to come from
+different sources such as game and engine content. Search order must not
+silently shadow a module: if distinct modules with the requested name are
+found in multiple roots, resolution fails with an ambiguity error. Duplicate
+results that resolve to the same canonical module identifier are treated as
+one module.
+
+The host may also pass an explicit module catalog to the loader. Each catalog
+entry identifies a module and the provider or canonical source identifier
+that supplies it. The catalog makes the available module set enumerable
+without requiring the provider to scan a filesystem or VFS, and can be used
+for validation and tooling. Supplying a catalog does not eagerly execute or
+load every module. Providers may support dynamic resolution as well; the
+interaction between a catalog and dynamic modules must be explicit in the
+loader configuration.
+
+Conceptually:
+
+```cpp
+struct ModuleLoaderConfig
+{
+    std::string basePath;
+    std::vector<std::string> searchPaths;
+    std::vector<ModuleDescriptor> modules;
+};
+```
+
+Exact name-to-path mapping rules, such as dotted names and source extensions,
+remain provider-defined and must be documented by each provider.
+
+## 27.2 Optional LuaRocks Integration
 
 LuaRocks support is an optional build feature, controlled by
 `LUNARIS_ENABLE_LUAROCKS` and disabled by default. When disabled, the core
@@ -1813,7 +1856,7 @@ tests/
 | Compiler/bytecode | valid and invalid source, compile/load round trip, version compatibility checks |
 | Bytecode cache | hit, miss, source-hash invalidation, compiler-version invalidation, bytecode-version invalidation, storage failures |
 | Scripts | isolated environments, execute, reset, repeated execution, reload modes |
-| Modules | one-time load, cache hit, failure caching policy, dependency invalidation and reload |
+| Modules | one-time load, cache hit, failure caching policy, dependency invalidation and reload; base path and multiple search roots; ambiguity detection; duplicate canonical result handling; explicit catalog enumeration without eager loading |
 | Libraries | individual registration, combined flags, repeated registration behavior, unavailable library behavior |
 | SharedTable | allowed/rejected value types, nested SharedTables, registry set/get/remove, concurrent access contract |
 | Futures/Actors | ready/pending states, result and error propagation, cancellation semantics, message delivery, ordering guarantees |
