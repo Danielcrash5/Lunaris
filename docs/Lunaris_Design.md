@@ -1687,6 +1687,11 @@ once with a value or `Error`. Destroying an unfinished Promise fails the
 Future. Cancellation wins only while the Future is pending; it does not
 interrupt work already running in the host scheduler.
 
+The `Scheduler` interface lets a host accept callable tasks while retaining
+control of their execution context. A host may schedule an Actor's
+`dispatch_pending()` call on the Actor's designated context; Lunaris does not
+schedule it automatically.
+
 C++:
 
 ```cpp
@@ -1750,6 +1755,13 @@ a non-empty string topic and scalar `Value` payload. It does not own Luau
 States or schedule handlers. Concurrent sends are ordered by the queue's
 internal synchronization. Closing rejects future sends, wakes waiting
 receivers, and leaves queued messages available until drained.
+
+The C++ `Actor` binds one handler per topic and consumes its mailbox only when
+the host calls `dispatch_one()` or `dispatch_pending()`. Dispatch calls should
+be serialized on the Actor's chosen execution context; a concurrent or
+reentrant dispatch attempt returns an error. Handler failures are returned
+explicitly; the message whose handler failed has already been consumed. Actors
+do not own Luau States yet.
 
 ```lua
 actor:SendMessage(
@@ -2416,8 +2428,10 @@ The host-side `Promise<T>`/`Future<T>` primitives are also implemented with
 single-consumer results, error propagation, cancellation, and no built-in
 scheduler. The scheduler-neutral C++ `MessageQueue` provides ordered FIFO
 delivery of topic/payload messages, blocking and non-blocking receive, and
-drain-on-close behavior. Luau `await`, task spawning, scheduler dispatch,
-transferable userdata, and Actors remain open.
+drain-on-close behavior. A host-owned `Scheduler` interface and C++ `Actor`
+mailbox/handler seam provide explicit, host-driven dispatch. Luau `await`,
+task spawning, Actor Luau bindings, transferable userdata, and automated
+scheduler integration remain open.
 
 ## Phase 9: Optional Integrations and Release Readiness
 
