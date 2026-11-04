@@ -2,11 +2,6 @@
 
 #include <lua.h>
 
-#include <Luau/Allocator.h>
-#include <Luau/BytecodeBuilder.h>
-#include <Luau/Compiler.h>
-#include <Luau/Parser.h>
-
 #include <cstdlib>
 #include <exception>
 #include <limits>
@@ -252,6 +247,23 @@ Result<void> State::set_global(std::string_view name, const Value &value) {
 
 Result<Script> State::load_script(std::string_view source,
                                   std::string_view chunkName) {
+    (void)checked_state();
+    if (chunkName.find('\0') != std::string_view::npos) {
+        return Result<Script>::failure(
+            Error(ErrorType::Load, "chunk name contains an embedded null byte",
+                  std::string(chunkName)));
+    }
+
+    auto bytecode = Bytecode::compile(source, chunkName);
+    if (!bytecode) {
+        return Result<Script>::failure(bytecode.error());
+    }
+
+    return load_bytecode(bytecode.value(), chunkName);
+}
+
+Result<Script> State::load_bytecode(const Bytecode &bytecode,
+                                    std::string_view chunkName) {
     lua_State *state = checked_state();
     if (chunkName.find('\0') != std::string_view::npos) {
         return Result<Script>::failure(
@@ -259,42 +271,12 @@ Result<Script> State::load_script(std::string_view source,
                   std::string(chunkName)));
     }
 
-    const std::string sourceText(source);
-    const std::string sourceName(chunkName);
-    std::string bytecode;
-    try {
-        Luau::Allocator allocator;
-        Luau::AstNameTable names(allocator);
-        Luau::ParseResult parseResult = Luau::Parser::parse(
-            sourceText.c_str(), sourceText.size(), names, allocator);
-        if (!parseResult.errors.empty()) {
-            const Luau::ParseError &parseError = parseResult.errors.front();
-            const Luau::Location &location = parseError.getLocation();
-            return Result<Script>::failure(
-                Error(ErrorType::Compile, parseError.what(), sourceName,
-                      location.begin.line + 1, location.begin.column + 1));
-        }
-
-        Luau::BytecodeBuilder bytecodeBuilder;
-        Luau::compileOrThrow(bytecodeBuilder, parseResult, names);
-        bytecode = bytecodeBuilder.getBytecode();
-    } catch (const Luau::CompileError &exception) {
-        const Luau::Location &location = exception.getLocation();
-        return Result<Script>::failure(
-            Error(ErrorType::Compile, exception.what(), sourceName,
-                  location.begin.line + 1, location.begin.column + 1));
-    } catch (const std::bad_alloc &) {
-        return Result<Script>::failure(
-            Error(ErrorType::Memory, "out of memory while compiling script",
-                  sourceName));
-    } catch (const std::exception &exception) {
-        return Result<Script>::failure(
-            Error(ErrorType::Compile, exception.what(), sourceName));
-    }
-
     StackRestore restore(state);
-    const int loadStatus = luau_load(state, sourceName.c_str(), bytecode.data(),
-                                     bytecode.size(), 0);
+    const std::string sourceName(chunkName);
+    const std::string_view bytecodeBytes = bytecode.bytes();
+    const int loadStatus =
+        luau_load(state, sourceName.c_str(), bytecodeBytes.data(),
+                  bytecodeBytes.size(), 0);
     if (loadStatus != LUA_OK) {
         std::size_t messageLength = 0;
         const char *message = lua_tolstring(state, -1, &messageLength);

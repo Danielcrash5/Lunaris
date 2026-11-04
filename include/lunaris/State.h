@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lunaris/Bytecode.h"
 #include "lunaris/Result.h"
 #include "lunaris/Script.h"
 #include "lunaris/StateConfig.h"
@@ -109,6 +110,12 @@ class State {
     /// @throws std::logic_error if this State has been moved from.
     [[nodiscard]] Result<Script> load_script(std::string_view source,
                                              std::string_view chunkName);
+
+    /// Loads owned Luau bytecode into this State as a Script.
+    /// Bytecode format and version errors are returned as Load errors.
+    /// @throws std::logic_error if this State has been moved from.
+    [[nodiscard]] Result<Script> load_bytecode(const Bytecode &bytecode,
+                                               std::string_view chunkName);
 
     /// Pushes an integer onto the Luau stack.
     template <std::integral T>

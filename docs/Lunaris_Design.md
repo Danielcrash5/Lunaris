@@ -701,24 +701,34 @@ but the non-throwing Result API is preferred for engine code.
 
 # 20. Compiler and Bytecode
 
-Luau source is compiled and loaded with `State::load_script`. The returned
-move-only `Script` owns a registry reference and can be executed repeatedly:
+`Bytecode` owns a version-checked bytecode blob. Source can be compiled
+independently, then loaded into a State; `State::load_script` remains a
+convenience for the combined operation. The returned move-only `Script` owns a
+registry reference and can be executed repeatedly:
 
 ```cpp
-auto loaded =
-    lua.load_script(source, "game://scripts/player.luau");
+auto bytecode =
+    lunaris::Bytecode::compile(source, "game://scripts/player.luau");
 
-if (loaded)
+if (bytecode)
 {
-    auto execution =
-        loaded.value().execute();
+    auto loaded =
+        lua.load_bytecode(bytecode.value(), "game://scripts/player.luau");
+
+    if (loaded)
+    {
+        auto execution =
+            loaded.value().execute();
+    }
 }
 ```
 
 Compile, load, and runtime failures are returned as structured errors. Script
 execution restores the State stack and currently converts scalar return values
-only. Public compiler options, explicit bytecode ownership/version checks, and
-bytecode caching remain future work.
+only. Bytecode blobs can be reconstructed from owned binary data; bytecode
+version headers are checked before loading, while complete bytecode validation
+is performed by Luau's loader. Public compiler options and bytecode caching
+remain future work.
 
 The exact bytecode representation follows the Luau version used by the repository.
 
@@ -2202,9 +2212,9 @@ behavior is documented and tested.
 - Add explicit bytecode ownership, loading, and version checks.
 - Add bytecode cache and pluggable cache storage.
 
-The first source-to-bytecode-to-execution slice is implemented through
-`State::load_script` and `Script::execute`. Public compiler options, bytecode
-ownership, and caching remain future work.
+Source compilation, owned bytecode loading/version checks, and execution are
+implemented through `Bytecode`, `State::load_bytecode`, `State::load_script`,
+and `Script::execute`. Public compiler options and caching remain future work.
 
 **Exit criteria:** source-to-bytecode-to-execution and load/execute error paths
 are covered by tests.
