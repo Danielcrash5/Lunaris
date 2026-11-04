@@ -1000,6 +1000,15 @@ struct ModuleLoaderConfig
 Exact name-to-path mapping rules, such as dotted names and source extensions,
 remain provider-defined and must be documented by each provider.
 
+The first implementation slice provides `ModuleProvider`,
+`ModuleLoaderConfig`, and `ModuleLoader::resolve`. Resolution considers
+matching catalog entries and every distinct configured root. Identical results
+with the same canonical ID and source are deduplicated; conflicting contents
+for one ID and distinct matches are errors. Dynamic resolution can be disabled
+to make the catalog authoritative. This slice resolves source only; executing
+modules through Luau `require`, module caching, and dependency tracking are
+subsequent work.
+
 ## 27.2 Optional LuaRocks Integration
 
 LuaRocks support is an optional build feature, controlled by
@@ -2208,6 +2217,7 @@ behavior are covered without leaking or corrupting environments.
 
 ## Phase 6: Module Loader
 
+- Resolve module names through provider roots and an optional catalog.
 - Implement unified Luau `require(...)` through Lunaris' Module Loader.
 - Add configurable base path, multiple search paths, and an optional module
   catalog.
@@ -2217,6 +2227,10 @@ behavior are covered without leaking or corrupting environments.
 
 **Exit criteria:** tests cover provider resolution, paths, catalog behavior,
 cache behavior, cycles/failures, dependency invalidation, and reload.
+
+The provider/root/catalog resolution slice is implemented and tested. Luau
+`require`, module execution/caching, dependency tracking, and reload remain
+open.
 
 ## Phase 7: Optional LuaRocks and Native Modules
 
