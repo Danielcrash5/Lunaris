@@ -37,6 +37,7 @@ The wrapper should provide:
 - enums and flags
 - error handling
 - custom allocator support
+- optional per-State Luau memory limit
 - compiler and bytecode handling
 - bytecode caching
 - standalone-script management
@@ -243,6 +244,36 @@ Profiler
 The wrapper does not make a user-provided allocator thread-safe.
 
 The `userData` object must remain alive for the lifetime of the State.
+
+## 8.1 Per-State Memory Limit
+
+`StateConfig` may specify an optional hard limit for memory requested by
+Luau through the State's allocator. The default is unlimited, preserving
+existing behavior. The limit applies whether Lunaris uses its default
+allocator or wraps a caller-provided allocator.
+
+Lunaris tracks current allocated bytes per State. Before an allocation or
+growth, it checks whether the request would exceed the configured limit. If
+so, the allocator reports failure to Luau, which surfaces its normal
+out-of-memory error. Reallocations account for the old allocation size, and
+failed allocations must leave accounting and the existing allocation
+unchanged. Frees reduce the current usage. The limit must not be exceeded
+temporarily during reallocation.
+
+Conceptually:
+
+```cpp
+struct StateConfig {
+    Allocator allocator{};
+    std::optional<std::size_t> memoryLimit;
+};
+```
+
+The limit covers allocations made through the Luau State allocator only. It
+does not cap total process memory or automatically account for allocations
+made directly by host C++ code, LuaRocks native modules, or other libraries
+that bypass the Luau allocator. Applications requiring a process-wide limit
+must enforce it at the host or operating-system level.
 
 A running State should not arbitrarily replace its allocator. Preferred lifecycle:
 
@@ -1851,7 +1882,7 @@ tests/
 | Tables and functions | get/set, missing keys, argument/return conversion, protected calls, error propagation |
 | Bindings | free functions, lambdas, member methods, const methods, properties, read-only properties, constructors, overload resolution |
 | Userdata | type checks, ownership, destruction, Local/Transferable/Shared policy enforcement |
-| Allocator | allocate/reallocate/free accounting, peak/current bytes, failed allocation behavior, user-data lifetime |
+| Allocator | allocate/reallocate/free accounting, peak/current bytes, memory-limit boundary and over-limit failures, failed reallocation preserving old storage, custom allocator integration, user-data lifetime |
 | Errors | compile, load, runtime, type and memory errors; source/line/column when Luau provides them |
 | Compiler/bytecode | valid and invalid source, compile/load round trip, version compatibility checks |
 | Bytecode cache | hit, miss, source-hash invalidation, compiler-version invalidation, bytecode-version invalidation, storage failures |
