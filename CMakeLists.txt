@@ -27,6 +27,7 @@ add_library(lunaris
     src/Library.cpp
     src/ModuleLoader.cpp
     src/Script.cpp
+    src/SharedTable.cpp
     src/State.cpp
     src/Table.cpp
 )

@@ -7,6 +7,7 @@
 #include "lunaris/ModuleLoader.h"
 #include "lunaris/Result.h"
 #include "lunaris/Script.h"
+#include "lunaris/SharedTable.h"
 #include "lunaris/StateConfig.h"
 #include "lunaris/Table.h"
 #include "lunaris/Value.h"
@@ -243,6 +244,7 @@ class State {
     }
 
   private:
+    friend class SharedTableRegistry;
     struct AllocatorContext;
 
     [[nodiscard]] lua_State *checked_state() const;

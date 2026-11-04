@@ -15,6 +15,9 @@ struct lua_State;
 namespace lunaris {
 class ModuleLoader;
 class BytecodeCacheStorage;
+namespace detail {
+struct SharedTableRegistryData;
+}
 } // namespace lunaris
 
 namespace lunaris::detail {
@@ -29,6 +32,7 @@ struct StateLifetime {
     lua_State *state = nullptr;
     std::shared_ptr<ModuleLoader> moduleLoader;
     std::shared_ptr<BytecodeCacheStorage> bytecodeCacheStorage;
+    std::shared_ptr<SharedTableRegistryData> sharedTableRegistry;
     CompilerOptions compilerOptions;
     std::unordered_map<std::string, ModuleCacheEntry> moduleCache;
     std::unordered_map<std::string, int> nativeLibraryModules;

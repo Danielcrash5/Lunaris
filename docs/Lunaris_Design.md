@@ -1788,8 +1788,6 @@ local data2 =
     )
 ```
 
-Registry lifetime is process/engine-wide.
-
 The registry supports:
 
 ```lua
@@ -1798,20 +1796,38 @@ SharedTableRegistry:GetSharedTable("WorldData")
 SharedTableRegistry:SetSharedTable("WorldData", nil)
 ```
 
+Install the same explicit C++ registry in every State that should share data:
+
+```cpp
+lunaris::SharedTableRegistry registry;
+registry.install(firstState);
+registry.install(secondState);
+```
+
+The registry and its tables remain alive while held by the registry, installed
+States, or C++ SharedTable handles. Every registry and table operation is
+protected by an internal mutex. Individual operations are safe across States
+and host threads; this does not make multiple operations atomic or allow
+concurrent VM access to a single State.
+
+Lua keys must be strings. Tables support indexed access plus `Get`, `Set`,
+`Remove`, and `Count`. Setting a value to nil removes the key. Supported values
+are booleans, numbers, strings, and nested SharedTables. Ordinary tables,
+functions, threads, and other userdata are rejected.
+
 ---
 
 # 39. SharedTable Value Rules
 
 Supported values should be explicit.
 
-Possible default values:
+Implemented values:
 
 - nil
 - boolean
 - number
 - string
 - SharedTable
-- explicitly transferable userdata
 
 Avoid arbitrary:
 
@@ -1822,7 +1838,8 @@ Avoid arbitrary:
 - States
 - arbitrary engine handles
 
-Userdata sharing is controlled by `UserdataSharing`.
+Transferable userdata remains deferred until cross-State ownership semantics
+are explicitly implemented.
 
 ---
 
@@ -2381,6 +2398,11 @@ defines a compatible Luau ABI.
 
 **Exit criteria:** ownership, ordering, cancellation, and synchronization
 contracts are documented and deterministically tested.
+
+The initial SharedTable/SharedTableRegistry slice is implemented with explicit
+registry instances, per-operation thread safety, cross-State sharing,
+scalar/nested-table values, nil removal, and unsupported-value rejection.
+Transferable userdata, Futures, and Actors remain open.
 
 ## Phase 9: Optional Integrations and Release Readiness
 
