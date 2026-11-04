@@ -86,6 +86,23 @@ void Library::set_constant(std::string_view name, const Value &value) {
     });
 }
 
+void Library::register_module(std::string_view moduleName,
+                              LibraryVisibility visibility) {
+    if (moduleName.empty() || moduleName.find('\0') != std::string_view::npos) {
+        throw std::invalid_argument(
+            "library module name must be non-empty and contain no null byte");
+    }
+    if (visibility != LibraryVisibility::GlobalAndModule &&
+        visibility != LibraryVisibility::ModuleOnly) {
+        throw std::invalid_argument("invalid library visibility");
+    }
+
+    auto lifetime = checked_lifetime();
+    detail::register_library_module(
+        lifetime->state, lifetime, moduleName, m_reference, m_name,
+        visibility == LibraryVisibility::ModuleOnly);
+}
+
 void Library::release() noexcept {
     if (m_reference < 0) {
         return;

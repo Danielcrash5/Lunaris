@@ -68,6 +68,17 @@ void record_dependency(detail::StateLifetime &lifetime,
 int require_module_impl(lua_State *state, detail::StateLifetime &lifetime,
                         std::string_view name, std::string &error) {
     const int initialTop = lua_gettop(state);
+    const auto nativeModule =
+        lifetime.nativeLibraryModules.find(std::string(name));
+    if (nativeModule != lifetime.nativeLibraryModules.end()) {
+        lua_getref(state, nativeModule->second);
+        return 1;
+    }
+    if (!lifetime.moduleLoader) {
+        error = "module '" + std::string(name) + "' was not found";
+        lua_settop(state, initialTop);
+        return 0;
+    }
     auto resolved = lifetime.moduleLoader->resolve(name);
     if (!resolved) {
         error = std::string(resolved.error().message());
@@ -232,7 +243,7 @@ int require_module(lua_State *state) {
     auto *lifetime = static_cast<detail::StateLifetime *>(
         lua_touserdata(state, lua_upvalueindex(1)));
     if (lifetime == nullptr || lifetime->state != state ||
-        !lifetime->moduleLoader) {
+        (!lifetime->moduleLoader && lifetime->nativeLibraryModules.empty())) {
         lua_pushstring(state, "Lunaris module loader is not available");
         lua_error(state);
         return 0;
@@ -389,13 +400,63 @@ void detail::install_module_loader(
     std::shared_ptr<ModuleLoader> moduleLoader) {
     clear_module_cache(state, *lifetime);
     lifetime->moduleLoader = std::move(moduleLoader);
-    if (lifetime->moduleLoader) {
+    if (lifetime->moduleLoader || !lifetime->nativeLibraryModules.empty()) {
         lua_pushlightuserdata(state, lifetime.get());
         lua_pushcclosure(state, require_module, "require", 1);
         lua_setglobal(state, "require");
     } else {
         lua_pushnil(state);
         lua_setglobal(state, "require");
+    }
+}
+
+void detail::register_library_module(
+    lua_State *state, const std::shared_ptr<StateLifetime> &lifetime,
+    std::string_view moduleName, int libraryReference,
+    std::string_view globalName, bool moduleOnly) {
+    if (lifetime == nullptr || lifetime->state != state) {
+        throw std::logic_error("library State is not available");
+    }
+    if (moduleName.empty() || moduleName.find('\0') != std::string_view::npos) {
+        throw std::invalid_argument(
+            "library module name must be non-empty and contain no null byte");
+    }
+    const std::string key(moduleName);
+    if (lifetime->nativeLibraryModules.contains(key)) {
+        throw std::invalid_argument("native library module '" + key +
+                                    "' is already registered");
+    }
+
+    const int initialTop = lua_gettop(state);
+    lua_getref(state, libraryReference);
+    if (lua_type(state, -1) != LUA_TTABLE) {
+        lua_settop(state, initialTop);
+        throw std::runtime_error("registered Luau library is missing");
+    }
+    const int moduleReference = lua_ref(state, -1);
+    lua_settop(state, initialTop);
+    try {
+        lifetime->nativeLibraryModules.emplace(key, moduleReference);
+    } catch (...) {
+        lua_unref(state, moduleReference);
+        throw;
+    }
+
+    if (!lifetime->moduleLoader) {
+        lua_pushlightuserdata(state, lifetime.get());
+        lua_pushcclosure(state, require_module, "require", 1);
+        lua_setglobal(state, "require");
+    }
+    if (moduleOnly) {
+        const int stackTop = lua_gettop(state);
+        lua_getref(state, libraryReference);
+        const std::string globalNameString(globalName);
+        lua_getglobal(state, globalNameString.c_str());
+        if (lua_rawequal(state, -1, -2)) {
+            lua_pushnil(state);
+            lua_setglobal(state, globalNameString.c_str());
+        }
+        lua_settop(state, stackTop);
     }
 }
 

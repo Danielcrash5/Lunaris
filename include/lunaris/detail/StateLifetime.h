@@ -27,6 +27,7 @@ struct StateLifetime {
     lua_State *state = nullptr;
     std::shared_ptr<ModuleLoader> moduleLoader;
     std::unordered_map<std::string, ModuleCacheEntry> moduleCache;
+    std::unordered_map<std::string, int> nativeLibraryModules;
     std::vector<std::string> loadingModules;
     std::vector<std::shared_ptr<void>> bindingRegistrations;
     std::unordered_map<std::string, void *> bindingTypes;
@@ -35,6 +36,10 @@ struct StateLifetime {
 void install_module_loader(lua_State *state,
                            const std::shared_ptr<StateLifetime> &lifetime,
                            std::shared_ptr<ModuleLoader> moduleLoader);
+void register_library_module(lua_State *state,
+                             const std::shared_ptr<StateLifetime> &lifetime,
+                             std::string_view moduleName, int libraryReference,
+                             std::string_view globalName, bool moduleOnly);
 [[nodiscard]] Result<void> invalidate_module(StateLifetime &lifetime,
                                              std::string_view name);
 [[nodiscard]] Result<void> reload_module(StateLifetime &lifetime,

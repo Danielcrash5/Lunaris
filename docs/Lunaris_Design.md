@@ -569,6 +569,25 @@ visible through the named global table. `State::push_borrowed` and
 `Library::push_borrowed` and `Library::push_shared` address types registered
 inside that library.
 
+A library can also be explicitly exposed as a native module:
+
+```cpp
+auto math = state.create_library("Math");
+math.set_function("Add", &add);
+math.register_module("math");
+```
+
+Luau can then load the same read-only table with
+`require("math")`. The module name is chosen by the application, is unique
+per State, and stays registered for that State's lifetime. It can use any
+non-empty name without null bytes. Native modules do not use source-module
+reload or invalidation; if a name is also resolvable by the source loader, the
+registered native module takes precedence. Register a new State to replace a
+native library module. By default, the library remains accessible under its
+global name as well. Pass `LibraryVisibility::ModuleOnly` to
+`register_module()` to remove that global name when it still refers to this
+library table, leaving `require()` as its access path.
+
 ---
 
 # 14. Userdata Sharing

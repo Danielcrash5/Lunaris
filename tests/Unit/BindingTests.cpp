@@ -456,3 +456,62 @@ TEST(BindingTests, RegistersFunctionsConstantsEnumsAndUsertypesInLibrary) {
     ASSERT_TRUE(readonly);
     EXPECT_FALSE(readonly.value().execute());
 }
+
+TEST(BindingTests, RequiresRegisteredLibraryWithoutReplacingItsGlobal) {
+    lunaris::State state;
+    auto library = state.create_library("Math");
+    library.set_constant("offset", std::int64_t{3});
+    library.set_function("add", &add_values);
+    library.register_module("math");
+    lua_getglobal(state.native_handle(), "require");
+    EXPECT_EQ(lua_type(state.native_handle(), -1), LUA_TFUNCTION);
+    lua_pop(state.native_handle(), 1);
+
+    auto script = state.load_script(
+        "local required = require('math'); "
+        "return required.add(required.offset, 4), required == Math, "
+        "required == require('math')",
+        "native-library-require.luau");
+    ASSERT_TRUE(script);
+    auto result = script.value().execute();
+    ASSERT_TRUE(result) << result.error().message();
+    ASSERT_EQ(result.value().size(), 3U);
+    EXPECT_EQ(std::get<std::int64_t>(result.value()[0]), 7);
+    EXPECT_TRUE(std::get<bool>(result.value()[1]));
+    EXPECT_TRUE(std::get<bool>(result.value()[2]));
+
+    state.set_module_loader(nullptr);
+    auto after_loader_reset =
+        state.load_script("return require('math').offset",
+                          "native-library-require-after-reset.luau");
+    ASSERT_TRUE(after_loader_reset);
+    auto after_reset_result = after_loader_reset.value().execute();
+    ASSERT_TRUE(after_reset_result) << after_reset_result.error().message();
+    ASSERT_EQ(after_reset_result.value().size(), 1U);
+    EXPECT_EQ(std::get<std::int64_t>(after_reset_result.value()[0]), 3);
+
+    EXPECT_THROW(library.register_module("math"), std::invalid_argument);
+    EXPECT_NO_THROW(library.register_module("game/math"));
+}
+
+TEST(BindingTests, CanExposeLibraryOnlyThroughRequire) {
+    lunaris::State state;
+    auto library = state.create_library("InternalMath");
+    library.set_constant("offset", std::int64_t{8});
+    library.register_module("private.math",
+                            lunaris::LibraryVisibility::ModuleOnly);
+
+    lua_getglobal(state.native_handle(), "InternalMath");
+    EXPECT_EQ(lua_type(state.native_handle(), -1), LUA_TNIL);
+    lua_pop(state.native_handle(), 1);
+
+    auto script = state.load_script(
+        "return InternalMath == nil, require('private.math').offset",
+        "module-only-library.luau");
+    ASSERT_TRUE(script);
+    auto result = script.value().execute();
+    ASSERT_TRUE(result) << result.error().message();
+    ASSERT_EQ(result.value().size(), 2U);
+    EXPECT_TRUE(std::get<bool>(result.value()[0]));
+    EXPECT_EQ(std::get<std::int64_t>(result.value()[1]), 8);
+}

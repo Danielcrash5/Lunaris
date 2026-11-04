@@ -11,6 +11,9 @@
 
 namespace lunaris {
 
+/// Controls whether a registered library module is also available globally.
+enum class LibraryVisibility { GlobalAndModule, ModuleOnly };
+
 namespace detail {
 
 class LibraryFunction {
@@ -84,6 +87,13 @@ class Library {
 
     /// Adds a scalar constant to the library.
     void set_constant(std::string_view name, const Value &value);
+
+    /// Registers this library as a stable require(moduleName) module.
+    /// The module name must be unique within its State. ModuleOnly also
+    /// removes the library's global name if it still refers to this table.
+    void register_module(
+        std::string_view moduleName,
+        LibraryVisibility visibility = LibraryVisibility::GlobalAndModule);
 
     /// Pushes a non-owning object registered as a library usertype.
     template <typename T>
