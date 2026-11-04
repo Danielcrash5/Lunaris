@@ -5,6 +5,7 @@ add_executable(lunaris_tests
     Unit/BytecodeTests.cpp
     Unit/BytecodeCacheTests.cpp
     Unit/ErrorTests.cpp
+    Unit/FutureTests.cpp
     Unit/GlobalTests.cpp
     Unit/ModuleLoaderTests.cpp
     Unit/ModuleRequireTests.cpp

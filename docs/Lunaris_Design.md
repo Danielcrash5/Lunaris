@@ -1681,17 +1681,21 @@ Axiom owns:
 - actor scheduling
 
 The wrapper provides the primitives required by the scheduler.
+Lunaris does not create threads or schedule work. A Future is single-consumer:
+it can wait for and retrieve one `Result<T>`, while its Promise completes it
+once with a value or `Error`. Destroying an unfinished Promise fails the
+Future. Cancellation wins only while the Future is pending; it does not
+interrupt work already running in the host scheduler.
 
 C++:
 
 ```cpp
-auto future =
-    scheduler.submit([] {
-        return expensive_calculation();
-    });
+lunaris::Promise<int> promise;
+auto future = promise.get_future();
 
-auto result =
-    future.get();
+// A host scheduler or worker completes the promise.
+promise.set_value(expensive_calculation());
+auto result = future.get();
 ```
 
 Luau:
@@ -2402,7 +2406,10 @@ contracts are documented and deterministically tested.
 The initial SharedTable/SharedTableRegistry slice is implemented with explicit
 registry instances, per-operation thread safety, cross-State sharing,
 scalar/nested-table values, nil removal, and unsupported-value rejection.
-Transferable userdata, Futures, and Actors remain open.
+The host-side `Promise<T>`/`Future<T>` primitives are also implemented with
+single-consumer results, error propagation, cancellation, and no built-in
+scheduler. Luau `await`, task spawning, message passing, transferable userdata,
+and Actors remain open.
 
 ## Phase 9: Optional Integrations and Release Readiness
 
