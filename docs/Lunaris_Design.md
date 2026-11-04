@@ -644,7 +644,8 @@ enum class ErrorType
     Runtime,
     Type,
     Memory,
-    Cache
+    Cache,
+    Module
 };
 ```
 
@@ -1000,14 +1001,19 @@ struct ModuleLoaderConfig
 Exact name-to-path mapping rules, such as dotted names and source extensions,
 remain provider-defined and must be documented by each provider.
 
-The first implementation slice provides `ModuleProvider`,
-`ModuleLoaderConfig`, and `ModuleLoader::resolve`. Resolution considers
+`ModuleProvider`, `ModuleLoaderConfig`, and `ModuleLoader::resolve` resolve
 matching catalog entries and every distinct configured root. Identical results
 with the same canonical ID and source are deduplicated; conflicting contents
 for one ID and distinct matches are errors. Dynamic resolution can be disabled
-to make the catalog authoritative. This slice resolves source only; executing
-modules through Luau `require`, module caching, and dependency tracking are
-subsequent work.
+to make the catalog authoritative.
+
+`State::set_module_loader` installs a state-local Luau `require` function.
+Modules compile and execute on first require, then cache the first returned
+value by canonical ID; a module with no return value caches `true`. A recursive
+require of a module that is currently loading reports a cycle error. Failed
+modules are not cached, so a later require can retry. Replacing or disabling
+the loader clears the State's module cache. This initial runtime implementation
+does not yet record dependency edges or expose explicit invalidation/reload.
 
 ## 27.2 Optional LuaRocks Integration
 

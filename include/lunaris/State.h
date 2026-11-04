@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lunaris/Bytecode.h"
+#include "lunaris/ModuleLoader.h"
 #include "lunaris/Result.h"
 #include "lunaris/Script.h"
 #include "lunaris/StateConfig.h"
@@ -118,6 +119,10 @@ class State {
     /// @throws std::logic_error if this State has been moved from.
     [[nodiscard]] Result<Script> load_bytecode(const Bytecode &bytecode,
                                                std::string_view chunkName);
+
+    /// Installs or replaces the provider used by Luau require(...).
+    /// Passing nullptr disables module loading and clears cached modules.
+    void set_module_loader(std::shared_ptr<ModuleLoader> moduleLoader);
 
     /// Pushes an integer onto the Luau stack.
     template <std::integral T>

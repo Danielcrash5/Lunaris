@@ -245,6 +245,11 @@ Result<void> State::set_global(std::string_view name, const Value &value) {
     return Result<void>::success();
 }
 
+void State::set_module_loader(std::shared_ptr<ModuleLoader> moduleLoader) {
+    lua_State *state = checked_state();
+    detail::install_module_loader(state, m_lifetime, std::move(moduleLoader));
+}
+
 Result<Script> State::load_script(std::string_view source,
                                   std::string_view chunkName) {
     (void)checked_state();
