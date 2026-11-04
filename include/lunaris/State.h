@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lunaris/Binding.h"
 #include "lunaris/Bytecode.h"
 #include "lunaris/ModuleLoader.h"
 #include "lunaris/Result.h"
@@ -123,6 +124,16 @@ class State {
     /// Installs or replaces the provider used by Luau require(...).
     /// Passing nullptr disables module loading and clears cached modules.
     void set_module_loader(std::shared_ptr<ModuleLoader> moduleLoader);
+
+    /// Registers an owned, State-local C++ usertype in Luau.
+    /// Supported members are data properties and non-overloaded member
+    /// functions using scalar arguments and return values.
+    /// A constructor<T, Args...>() descriptor adds Type.new(...).
+    template <typename T, typename... Descriptors>
+    void new_usertype(std::string_view name, Descriptors &&...descriptors) {
+        detail::register_usertype<T>(checked_state(), m_lifetime, name,
+                                     std::forward<Descriptors>(descriptors)...);
+    }
 
     /// Invalidates a module and all cached modules that depend on it.
     /// Invalidated modules are loaded again on their next require(...).

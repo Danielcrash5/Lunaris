@@ -28,6 +28,7 @@ struct StateLifetime {
     std::shared_ptr<ModuleLoader> moduleLoader;
     std::unordered_map<std::string, ModuleCacheEntry> moduleCache;
     std::vector<std::string> loadingModules;
+    std::vector<std::shared_ptr<void>> bindingRegistrations;
 };
 
 void install_module_loader(lua_State *state,

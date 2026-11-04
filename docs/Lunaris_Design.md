@@ -503,6 +503,19 @@ print(player.Health)
 
 The wrapper manages userdata, metatables, type checks and dispatch.
 
+The initial `State::new_usertype<T>` implementation supports State-local,
+Luau-owned objects created by one `constructor<T, Args...>()` descriptor,
+mutable or read-only data-member properties, and non-overloaded member
+functions. Constructor and member arguments/results support booleans, numeric
+scalars, `std::string`, and callback-scoped `std::string_view`. Invalid types,
+duplicate registration, and C++ exceptions are reported as Luau runtime
+errors or registration exceptions. Userdata destruction follows Luau garbage
+collection and State teardown.
+
+Borrowed/shared userdata, actor transfers, getter/setter properties,
+overloaded methods and constructors, enums, flags, and library registration
+are not part of this first binding slice.
+
 ---
 
 # 14. Userdata Sharing
@@ -2206,6 +2219,11 @@ boundary, successful calls, and error paths.
 - Add usertype binding, methods, and properties.
 - Add constructors, overloads, enums, and flags.
 - Add the library registration system.
+
+The first local-userdata slice is implemented: owned usertypes, one
+constructor signature, data-member properties, and non-overloaded methods.
+Borrowed/shared ownership, richer properties, overloads, enums/flags, and
+library registration remain open.
 
 **Exit criteria:** lifetime, invalid-type, ownership, and repeated-registration
 behavior is documented and tested.
