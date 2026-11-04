@@ -543,8 +543,31 @@ user-function bindings as their enum's underlying integer. Flags are exposed
 as constants; applications should define and validate any domain-specific
 combinations they require.
 
-Borrowed/shared userdata, actor transfers, and library registration are not
-part of this first binding slice.
+Borrowed userdata can be pushed with `State::push_borrowed<T>()`. It is
+non-owning: the host must keep the C++ object alive until after the State is
+closed and Luau has released its references. Shared userdata can be pushed
+with `State::push_shared<T>()`; its `std::shared_ptr<T>` is retained until
+Luau collects the userdata or closes the State. Shared ownership does not make
+the underlying type thread-safe.
+
+Named libraries are created with `State::create_library()`. Their Luau table
+is read-only to scripts and can hold scalar constants, free functions, enums,
+flags, and owned usertypes:
+
+```cpp
+auto math = state.create_library("Math");
+math.set_constant("Offset", std::int64_t{3});
+math.set_function("Add", &add);
+math.new_usertype<Vector>(
+    "Vector", constructor<Vector, double, double>(),
+    property("X", &Vector::x), property("Y", &Vector::y));
+```
+
+Library tables can be populated from C++ after creation; registrations are
+visible through the named global table. `State::push_borrowed` and
+`State::push_shared` address usertypes registered directly on the State;
+`Library::push_borrowed` and `Library::push_shared` address types registered
+inside that library.
 
 ---
 
@@ -2244,10 +2267,10 @@ boundary, successful calls, and error paths.
 - Add constructors, overloads, enums, and flags.
 - Add the library registration system.
 
-The first local-userdata slice is implemented: owned usertypes, constructor
-and method overload dispatch, data-member and getter/setter properties, and
-immutable enum/flag tables. Borrowed/shared ownership, actor transfers, and
-library registration remain open.
+The local-userdata slice is implemented: owned, borrowed, and shared userdata;
+constructor and method overload dispatch; data-member and getter/setter
+properties; immutable enum/flag tables; and named libraries with functions,
+constants, and usertypes. Actor transfers remain open.
 
 **Exit criteria:** lifetime, invalid-type, ownership, and repeated-registration
 behavior is documented and tested.

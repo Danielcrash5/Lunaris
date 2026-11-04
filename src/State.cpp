@@ -200,6 +200,31 @@ Table State::create_table() {
     return Table(m_lifetime, reference);
 }
 
+Library State::create_library(std::string_view name) {
+    if (name.empty() || name.find('\0') != std::string_view::npos) {
+        throw std::invalid_argument(
+            "library name must be non-empty and contain no null byte");
+    }
+
+    lua_State *state = checked_state();
+    StackRestore restore(state);
+    const std::string libraryName(name);
+    lua_getglobal(state, libraryName.c_str());
+    const bool exists = !lua_isnil(state, -1);
+    lua_pop(state, 1);
+    if (exists) {
+        throw std::invalid_argument("global '" + libraryName +
+                                    "' is already registered");
+    }
+
+    lua_createtable(state, 0, 0);
+    lua_pushvalue(state, -1);
+    lua_setglobal(state, libraryName.c_str());
+    lua_setreadonly(state, -1, true);
+    const int reference = lua_ref(state, -1);
+    return Library(m_lifetime, reference, libraryName);
+}
+
 Table State::get_table(int index) {
     validate_index(index);
     lua_State *state = checked_state();

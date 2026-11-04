@@ -1,8 +1,10 @@
 #include "lunaris/State.h"
 
 #include <gtest/gtest.h>
+#include <lua.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace {
@@ -81,12 +83,20 @@ struct LifetimeProbe {
         ++destroyed;
     }
 
+    int value() const {
+        return 42;
+    }
+
     static int constructed;
     static int destroyed;
 };
 
 int LifetimeProbe::constructed = 0;
 int LifetimeProbe::destroyed = 0;
+
+int add_values(int left, int right) {
+    return left + right;
+}
 
 } // namespace
 
@@ -355,4 +365,94 @@ TEST(BindingTests, EnumAndFlagTablesAreReadOnly) {
     ASSERT_TRUE(script);
     auto result = script.value().execute();
     ASSERT_FALSE(result);
+}
+
+TEST(BindingTests, BorrowedUserdataDoesNotDestroyTheHostObject) {
+    LifetimeProbe::constructed = 0;
+    LifetimeProbe::destroyed = 0;
+    LifetimeProbe object;
+    {
+        lunaris::State state;
+        state.new_usertype<LifetimeProbe>(
+            "LifetimeProbe", lunaris::method("value", &LifetimeProbe::value));
+        int wrongType = 0;
+        EXPECT_THROW(state.push_borrowed("LifetimeProbe", wrongType),
+                     std::invalid_argument);
+        EXPECT_EQ(state.top(), 0);
+        state.push_borrowed("LifetimeProbe", object);
+        lua_setglobal(state.native_handle(), "hostObject");
+
+        auto script = state.load_script("return hostObject:value()",
+                                        "borrowed-userdata.luau");
+        ASSERT_TRUE(script);
+        auto result = script.value().execute();
+        ASSERT_TRUE(result) << result.error().message();
+        ASSERT_EQ(result.value().size(), 1);
+        EXPECT_EQ(std::get<std::int64_t>(result.value()[0]), 42);
+        lua_gc(state.native_handle(), LUA_GCCOLLECT, 0);
+        EXPECT_EQ(LifetimeProbe::destroyed, 0);
+    }
+    EXPECT_EQ(LifetimeProbe::destroyed, 0);
+}
+
+TEST(BindingTests, SharedUserdataLivesUntilLuauReleasesIt) {
+    LifetimeProbe::constructed = 0;
+    LifetimeProbe::destroyed = 0;
+    lunaris::State state;
+    state.new_usertype<LifetimeProbe>(
+        "LifetimeProbe", lunaris::method("value", &LifetimeProbe::value));
+    auto object = std::make_shared<LifetimeProbe>();
+    state.push_shared("LifetimeProbe", object);
+    lua_setglobal(state.native_handle(), "hostObject");
+    object.reset();
+    EXPECT_EQ(LifetimeProbe::destroyed, 0);
+
+    auto script = state.load_script(
+        "local value = hostObject:value(); hostObject = nil; return value",
+        "shared-userdata.luau");
+    ASSERT_TRUE(script);
+    auto result = script.value().execute();
+    ASSERT_TRUE(result) << result.error().message();
+    EXPECT_EQ(LifetimeProbe::destroyed, 0);
+    lua_pushnil(state.native_handle());
+    lua_setglobal(state.native_handle(), "hostObject");
+    lua_gc(state.native_handle(), LUA_GCCOLLECT, 0);
+    EXPECT_EQ(LifetimeProbe::destroyed, 1);
+}
+
+TEST(BindingTests, RegistersFunctionsConstantsEnumsAndUsertypesInLibrary) {
+    Counter hostObject(11);
+    lunaris::State state;
+    auto library = state.create_library("Math");
+    library.set_constant("offset", std::int64_t{3});
+    library.set_function("add", &add_values);
+    library.new_enum<PlayerMode>(
+        "Mode", {{"Idle", PlayerMode::Idle}, {"Running", PlayerMode::Running}});
+    library.new_usertype<Counter>(
+        "Counter", lunaris::constructor<Counter, int>(),
+        lunaris::property("value", &Counter::value),
+        lunaris::method("current", &Counter::current));
+    library.push_borrowed("Counter", hostObject);
+    lua_setglobal(state.native_handle(), "hostCounter");
+
+    auto script = state.load_script(
+        "return Math.add(Math.offset, 4), Math.Mode.Running, "
+        "Math.Counter.new(9):current(), hostCounter:current()",
+        "library-bindings.luau");
+    ASSERT_TRUE(script);
+    auto result = script.value().execute();
+    ASSERT_TRUE(result) << result.error().message();
+    ASSERT_EQ(result.value().size(), 4);
+    EXPECT_EQ(std::get<std::int64_t>(result.value()[0]), 7);
+    EXPECT_EQ(std::get<std::int64_t>(result.value()[1]),
+              static_cast<std::int64_t>(PlayerMode::Running));
+    EXPECT_EQ(std::get<std::int64_t>(result.value()[2]), 9);
+    EXPECT_EQ(std::get<std::int64_t>(result.value()[3]), 11);
+    EXPECT_THROW(library.set_constant("offset", std::int64_t{5}),
+                 std::invalid_argument);
+
+    auto readonly =
+        state.load_script("Math.offset = 10", "readonly-library.luau");
+    ASSERT_TRUE(readonly);
+    EXPECT_FALSE(readonly.value().execute());
 }

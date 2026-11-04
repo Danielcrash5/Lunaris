@@ -18,6 +18,7 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <typeindex>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -240,6 +241,7 @@ class UserdataType {
   public:
     std::string name;
     std::string metatableName;
+    std::type_index cppType = typeid(void);
     std::vector<std::unique_ptr<UserdataMember>> members;
     std::unique_ptr<UserdataConstructor> constructor;
 
@@ -255,19 +257,71 @@ class UserdataType {
 
 template <typename T> struct UserdataStorage {
     bool initialized = false;
+    bool ownsInlineObject = false;
+    T *objectPointer = nullptr;
+    std::shared_ptr<T> sharedObject;
     alignas(T) std::byte object[sizeof(T)];
 
     [[nodiscard]] T *get() noexcept {
-        return std::launder(reinterpret_cast<T *>(object));
+        return objectPointer;
     }
 };
 
 template <typename T> void destroy_userdata(lua_State *, void *data) {
     auto *storage = static_cast<UserdataStorage<T> *>(data);
     if (storage->initialized) {
-        storage->get()->~T();
+        if (storage->ownsInlineObject) {
+            std::destroy_at(storage->get());
+        }
+        storage->sharedObject.reset();
+        storage->objectPointer = nullptr;
         storage->initialized = false;
+        storage->ownsInlineObject = false;
     }
+    storage->~UserdataStorage<T>();
+}
+
+template <typename T>
+void push_external_userdata(lua_State *state,
+                            const std::shared_ptr<StateLifetime> &lifetime,
+                            std::string_view typeName, T *object,
+                            std::shared_ptr<T> sharedObject = {}) {
+    static_assert(std::is_object_v<T> && !std::is_const_v<T>,
+                  "userdata must be a non-const object type");
+    if (object == nullptr) {
+        throw std::invalid_argument("userdata object cannot be null");
+    }
+    if (lifetime == nullptr || lifetime->state != state) {
+        throw std::logic_error("userdata State is not available");
+    }
+    const auto found = lifetime->bindingTypes.find(std::string(typeName));
+    if (found == lifetime->bindingTypes.end()) {
+        throw std::invalid_argument("usertype '" + std::string(typeName) +
+                                    "' is not registered");
+    }
+    auto *type = static_cast<UserdataType *>(found->second);
+    if (type->cppType != std::type_index(typeid(T))) {
+        throw std::invalid_argument("C++ type does not match registered "
+                                    "usertype '" +
+                                    std::string(typeName) + "'");
+    }
+    static_assert(alignof(T) <= alignof(std::max_align_t),
+                  "over-aligned C++ usertypes are not supported");
+
+    auto *storage = static_cast<UserdataStorage<T> *>(lua_newuserdatadtor(
+        state, sizeof(UserdataStorage<T>), destroy_userdata<T>));
+    if (storage == nullptr) {
+        throw std::bad_alloc{};
+    }
+    new (storage) UserdataStorage<T>();
+    storage->objectPointer = object;
+    storage->sharedObject = std::move(sharedObject);
+    storage->initialized = true;
+    lua_getfield(state, LUA_REGISTRYINDEX, type->metatableName.c_str());
+    if (lua_type(state, -1) != LUA_TTABLE) {
+        throw std::runtime_error("registered userdata metatable is missing");
+    }
+    lua_setmetatable(state, -2);
 }
 
 inline void require_userdata_type(lua_State *state, int index,
@@ -461,6 +515,48 @@ void register_named_values(
     lua_setglobal(state, globalName.c_str());
 }
 
+template <typename Enum>
+void register_named_values_in_table(
+    lua_State *state, int targetTable, std::string_view fieldName,
+    std::initializer_list<std::pair<std::string_view, Enum>> entries) {
+    if (fieldName.empty() || fieldName.find('\0') != std::string_view::npos) {
+        throw std::invalid_argument("library field name must be non-empty "
+                                    "and contain no null byte");
+    }
+    const int absoluteTable = lua_absindex(state, targetTable);
+    lua_getfield(state, absoluteTable, std::string(fieldName).c_str());
+    const bool exists = !lua_isnil(state, -1);
+    lua_pop(state, 1);
+    if (exists) {
+        throw std::invalid_argument("library field '" + std::string(fieldName) +
+                                    "' is already registered");
+    }
+
+    std::unordered_set<std::string> names;
+    for (const auto &[name, value] : entries) {
+        (void)value;
+        if (name.empty() || name.find('\0') != std::string_view::npos ||
+            !names.emplace(name).second) {
+            throw std::invalid_argument("invalid or duplicate enum/flag name");
+        }
+    }
+
+    lua_createtable(state, 0, static_cast<int>(entries.size()));
+    for (const auto &[name, value] : entries) {
+        lua_pushlstring(state, name.data(), name.size());
+        push_value(state, static_cast<std::underlying_type_t<Enum>>(value));
+        lua_rawset(state, -3);
+    }
+    lua_setreadonly(state, -1, true);
+    if (targetTable == LUA_GLOBALSINDEX) {
+        lua_setglobal(state, std::string(fieldName).c_str());
+    } else {
+        lua_setreadonly(state, absoluteTable, false);
+        lua_setfield(state, absoluteTable, std::string(fieldName).c_str());
+        lua_setreadonly(state, absoluteTable, true);
+    }
+}
+
 template <typename T> int push_return(lua_State *state, T &&value) {
     return push_value(state, std::forward<T>(value));
 }
@@ -596,6 +692,9 @@ class DefaultUserdataConstructor final : public UserdataConstructor {
                 new (storage) UserdataStorage<T>();
                 new (storage->object)
                     T(std::forward<decltype(values)>(values)...);
+                storage->objectPointer =
+                    std::launder(reinterpret_cast<T *>(storage->object));
+                storage->ownsInlineObject = true;
                 storage->initialized = true;
                 const std::string key(metatableName);
                 lua_getfield(state, LUA_REGISTRYINDEX, key.c_str());
@@ -1077,10 +1176,14 @@ void add_descriptor(const std::shared_ptr<UserdataType> &type,
 }
 
 template <typename T, typename... Descriptors>
-void register_usertype(lua_State *state,
-                       const std::shared_ptr<StateLifetime> &lifetime,
-                       std::string_view name, Descriptors &&...descriptors) {
-    if (name.empty() || name.find('\0') != std::string_view::npos) {
+void register_usertype_in_table(lua_State *state,
+                                const std::shared_ptr<StateLifetime> &lifetime,
+                                std::string_view typeNameView,
+                                std::string_view fieldName, int targetTable,
+                                Descriptors &&...descriptors) {
+    if (typeNameView.empty() ||
+        typeNameView.find('\0') != std::string_view::npos ||
+        fieldName.empty() || fieldName.find('\0') != std::string_view::npos) {
         throw std::invalid_argument(
             "usertype name must be non-empty and contain no null byte");
     }
@@ -1088,8 +1191,9 @@ void register_usertype(lua_State *state,
         throw std::logic_error("usertype State is not available");
     }
 
-    const std::string typeName(name);
-    lua_getglobal(state, typeName.c_str());
+    const std::string typeName(typeNameView);
+    const int absoluteTable = lua_absindex(state, targetTable);
+    lua_getfield(state, absoluteTable, std::string(fieldName).c_str());
     const bool globalExists = !lua_isnil(state, -1);
     lua_pop(state, 1);
     if (globalExists) {
@@ -1100,6 +1204,7 @@ void register_usertype(lua_State *state,
     auto type = std::make_shared<UserdataType>();
     type->name = typeName;
     type->metatableName = "lunaris.usertype." + typeName;
+    type->cppType = std::type_index(typeid(T));
     (add_descriptor<T>(type, std::forward<Descriptors>(descriptors)), ...);
 
     const int created = luaL_newmetatable(state, type->metatableName.c_str());
@@ -1125,13 +1230,28 @@ void register_usertype(lua_State *state,
     lua_pop(state, 1);
 
     lifetime->bindingRegistrations.push_back(type);
+    lifetime->bindingTypes.insert_or_assign(typeName, type.get());
     lua_createtable(state, 0, 1);
     if (type->constructor) {
         lua_pushlightuserdata(state, type.get());
         lua_pushcclosure(state, userdata_construct, "Lunaris constructor", 1);
         lua_setfield(state, -2, "new");
     }
-    lua_setglobal(state, typeName.c_str());
+    if (targetTable == LUA_GLOBALSINDEX) {
+        lua_setglobal(state, std::string(fieldName).c_str());
+    } else {
+        lua_setreadonly(state, absoluteTable, false);
+        lua_setfield(state, absoluteTable, std::string(fieldName).c_str());
+        lua_setreadonly(state, absoluteTable, true);
+    }
+}
+
+template <typename T, typename... Descriptors>
+void register_usertype(lua_State *state,
+                       const std::shared_ptr<StateLifetime> &lifetime,
+                       std::string_view name, Descriptors &&...descriptors) {
+    register_usertype_in_table<T>(state, lifetime, name, name, LUA_GLOBALSINDEX,
+                                  std::forward<Descriptors>(descriptors)...);
 }
 
 } // namespace detail

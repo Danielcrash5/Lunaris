@@ -2,6 +2,7 @@
 
 #include "lunaris/Binding.h"
 #include "lunaris/Bytecode.h"
+#include "lunaris/Library.h"
 #include "lunaris/ModuleLoader.h"
 #include "lunaris/Result.h"
 #include "lunaris/Script.h"
@@ -88,8 +89,30 @@ class State {
     /// Pushes an owned scalar value onto the Luau stack.
     void push(const Value &value);
 
+    /// Pushes a non-owning C++ object as userdata. The object must outlive
+    /// this State and every Luau reference to the userdata.
+    template <typename T>
+    void push_borrowed(std::string_view typeName, T &object) {
+        push_external_userdata(typeName, &object, {});
+    }
+
+    /// Pushes a shared C++ object as userdata. The userdata retains ownership
+    /// until Luau collects it or this State closes.
+    template <typename T>
+    void push_shared(std::string_view typeName, std::shared_ptr<T> object) {
+        if (object == nullptr) {
+            throw std::invalid_argument("shared userdata cannot be null");
+        }
+        T *pointer = object.get();
+        push_external_userdata(typeName, pointer, std::move(object));
+    }
+
     /// Creates a new table and returns a registry-backed handle to it.
     [[nodiscard]] Table create_table();
+
+    /// Creates a named library table in the global environment.
+    /// The table remains read-only to Luau scripts as entries are registered.
+    [[nodiscard]] Library create_library(std::string_view name);
 
     /// Creates a registry-backed handle for a table at \p index.
     /// @throws std::out_of_range if index is invalid.
@@ -213,6 +236,19 @@ class State {
     struct AllocatorContext;
 
     [[nodiscard]] lua_State *checked_state() const;
+    template <typename T>
+    void push_external_userdata(std::string_view typeName, T *object,
+                                std::shared_ptr<T> sharedObject) {
+        lua_State *state = checked_state();
+        const int stackTop = lua_gettop(state);
+        try {
+            detail::push_external_userdata<T>(state, m_lifetime, typeName,
+                                              object, std::move(sharedObject));
+        } catch (...) {
+            lua_settop(state, stackTop);
+            throw;
+        }
+    }
     void validate_index(int index) const;
     [[nodiscard]] bool get_boolean(int index) const;
     [[nodiscard]] std::int64_t get_integer(int index) const;
