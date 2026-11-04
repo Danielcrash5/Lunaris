@@ -257,8 +257,9 @@ growth, it checks whether the request would exceed the configured limit. If
 so, the allocator reports failure to Luau, which surfaces its normal
 out-of-memory error. Reallocations account for the old allocation size, and
 failed allocations must leave accounting and the existing allocation
-unchanged. Frees reduce the current usage. The limit must not be exceeded
-temporarily during reallocation.
+unchanged. Frees reduce the current usage. The limit governs the allocator's
+requested live bytes; an underlying allocator may temporarily use additional
+physical memory while moving a reallocation.
 
 Conceptually:
 
