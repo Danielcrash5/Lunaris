@@ -1,13 +1,164 @@
 #include "lunaris/Actor.h"
 
+#include "lunaris/Binding.h"
 #include "lunaris/Error.h"
+#include "lunaris/State.h"
 
+#include <lua.h>
+#include <lualib.h>
+
+#include <cstdint>
 #include <exception>
+#include <new>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace lunaris {
+namespace {
+
+constexpr char kActorTypeMarker = 0;
+constexpr const char *kActorMetatable = "lunaris.Actor.metatable.v1";
+
+class StackRestore {
+  public:
+    explicit StackRestore(lua_State *state)
+        : m_state(state), m_top(lua_gettop(state)) {
+    }
+
+    ~StackRestore() {
+        lua_settop(m_state, m_top);
+    }
+
+    StackRestore(const StackRestore &) = delete;
+    StackRestore &operator=(const StackRestore &) = delete;
+
+  private:
+    lua_State *m_state;
+    int m_top;
+};
+
+struct ActorUserdata {
+    std::shared_ptr<Actor> actor;
+};
+
+void destroy_actor_userdata(lua_State *, void *data) {
+    static_cast<ActorUserdata *>(data)->~ActorUserdata();
+}
+
+ActorUserdata *get_actor_userdata(lua_State *state, int index) {
+    if (lua_type(state, index) != LUA_TUSERDATA ||
+        !lua_getmetatable(state, index)) {
+        throw std::invalid_argument("expected an Actor handle");
+    }
+    lua_getfield(state, -1, "__lunaris_actor");
+    const bool matches = lua_touserdata(state, -1) == &kActorTypeMarker;
+    lua_pop(state, 2);
+    if (!matches) {
+        throw std::invalid_argument("expected an Actor handle");
+    }
+    auto *userdata = static_cast<ActorUserdata *>(lua_touserdata(state, index));
+    if (userdata == nullptr || userdata->actor == nullptr) {
+        throw std::invalid_argument("Actor handle is not initialized");
+    }
+    return userdata;
+}
+
+Value read_message_value(lua_State *state, int index) {
+    switch (lua_type(state, index)) {
+    case LUA_TNIL:
+        return std::monostate{};
+    case LUA_TBOOLEAN:
+        return lua_toboolean(state, index) != 0;
+    case LUA_TINTEGER: {
+        int isInteger = 0;
+        const auto value = lua_tointeger64(state, index, &isInteger);
+        if (isInteger == 0) {
+            throw std::invalid_argument("message integer is out of range");
+        }
+        return static_cast<std::int64_t>(value);
+    }
+    case LUA_TNUMBER: {
+        int isNumber = 0;
+        const double value = lua_tonumberx(state, index, &isNumber);
+        if (isNumber == 0) {
+            throw std::invalid_argument("message value must be a number");
+        }
+        return value;
+    }
+    case LUA_TSTRING: {
+        std::size_t length = 0;
+        const char *value = lua_tolstring(state, index, &length);
+        return std::string(value, length);
+    }
+    default:
+        throw std::invalid_argument(
+            "actor messages support only nil, booleans, numbers, and strings");
+    }
+}
+
+int actor_send_message(lua_State *state) {
+    return detail::invoke_protected(state, [state] {
+        if (lua_gettop(state) != 3) {
+            throw std::invalid_argument(
+                "Actor:SendMessage expects a topic and scalar payload");
+        }
+        auto *userdata = get_actor_userdata(state, 1);
+        if (lua_type(state, 2) != LUA_TSTRING) {
+            throw std::invalid_argument("actor message topic must be a string");
+        }
+        std::size_t length = 0;
+        const char *topic = lua_tolstring(state, 2, &length);
+        const Value payload = read_message_value(state, 3);
+        lua_pushboolean(state, userdata->actor->send(
+                                   std::string_view(topic, length), payload));
+        return 1;
+    });
+}
+
+int actor_index(lua_State *state) {
+    return detail::invoke_protected(state, [state] {
+        (void)get_actor_userdata(state, 1);
+        if (lua_type(state, 2) != LUA_TSTRING) {
+            lua_pushnil(state);
+            return 1;
+        }
+        std::size_t length = 0;
+        const char *key = lua_tolstring(state, 2, &length);
+        if (std::string_view(key, length) == "SendMessage") {
+            lua_pushcclosure(state, actor_send_message, "Actor.SendMessage", 0);
+        } else {
+            lua_pushnil(state);
+        }
+        return 1;
+    });
+}
+
+void install_actor_metatable(lua_State *state) {
+    if (luaL_newmetatable(state, kActorMetatable) == 0) {
+        lua_getfield(state, -1, "__lunaris_actor");
+        const bool matches = lua_touserdata(state, -1) == &kActorTypeMarker;
+        lua_pop(state, 1);
+        lua_pop(state, 1);
+        if (!matches) {
+            throw std::runtime_error("Actor metatable name is already in use");
+        }
+        return;
+    }
+    const int metatable = lua_gettop(state);
+    lua_pushlightuserdata(state, const_cast<char *>(&kActorTypeMarker));
+    lua_setfield(state, metatable, "__lunaris_actor");
+    lua_pushcclosure(state, actor_index, "Actor.__index", 0);
+    lua_setfield(state, metatable, "__index");
+    lua_pushstring(state, "protected Actor");
+    lua_setfield(state, metatable, "__metatable");
+    lua_setreadonly(state, metatable, true);
+    lua_pop(state, 1);
+}
+
+} // namespace
 
 void Actor::validate_topic(std::string_view topic) const {
     if (topic.empty() || topic.find('\0') != std::string_view::npos) {
@@ -112,6 +263,42 @@ bool Actor::is_closed() const {
 
 std::size_t Actor::pending() const {
     return m_messages.size();
+}
+
+void Actor::install(State &state, std::string_view globalName,
+                    std::shared_ptr<Actor> actor) {
+    if (globalName.empty() || globalName.find('\0') != std::string_view::npos) {
+        throw std::invalid_argument(
+            "Actor global name must be non-empty and contain no null byte");
+    }
+    if (actor == nullptr) {
+        throw std::invalid_argument("Actor handle cannot be null");
+    }
+
+    lua_State *lua = state.checked_state();
+    StackRestore restore(lua);
+    const std::string name(globalName);
+    lua_getglobal(lua, name.c_str());
+    const bool exists = !lua_isnil(lua, -1);
+    lua_pop(lua, 1);
+    if (exists) {
+        throw std::invalid_argument("global '" + name +
+                                    "' is already registered");
+    }
+
+    install_actor_metatable(lua);
+    auto *userdata = static_cast<ActorUserdata *>(lua_newuserdatadtor(
+        lua, sizeof(ActorUserdata), destroy_actor_userdata));
+    if (userdata == nullptr) {
+        throw std::bad_alloc{};
+    }
+    new (userdata) ActorUserdata{std::move(actor)};
+    lua_getfield(lua, LUA_REGISTRYINDEX, kActorMetatable);
+    if (lua_type(lua, -1) != LUA_TTABLE) {
+        throw std::runtime_error("Actor metatable is not installed");
+    }
+    lua_setmetatable(lua, -2);
+    lua_setglobal(lua, name.c_str());
 }
 
 } // namespace lunaris

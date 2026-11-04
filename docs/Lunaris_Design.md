@@ -1763,6 +1763,18 @@ reentrant dispatch attempt returns an error. Handler failures are returned
 explicitly; the message whose handler failed has already been consumed. Actors
 do not own Luau States yet.
 
+The host can install an Actor handle in a State:
+
+```cpp
+auto actor = std::make_shared<lunaris::Actor>();
+lunaris::Actor::install(senderState, "target", actor);
+```
+
+Luau can enqueue scalar messages with `target:SendMessage(topic, value)`.
+The handle is a destination; it does not dispatch automatically. A handler
+registered through the C++ `Actor::bind()` API runs only when the host calls
+dispatch on the Actor's designated context.
+
 ```lua
 actor:SendMessage(
     "SpawnEnemy",
@@ -2429,9 +2441,10 @@ single-consumer results, error propagation, cancellation, and no built-in
 scheduler. The scheduler-neutral C++ `MessageQueue` provides ordered FIFO
 delivery of topic/payload messages, blocking and non-blocking receive, and
 drain-on-close behavior. A host-owned `Scheduler` interface and C++ `Actor`
-mailbox/handler seam provide explicit, host-driven dispatch. Luau `await`,
-task spawning, Actor Luau bindings, transferable userdata, and automated
-scheduler integration remain open.
+mailbox/handler seam provide explicit, host-driven dispatch. Luau Actor handles
+can send scalar messages to C++-bound handlers. Luau `await`, task spawning,
+Luau `BindToMessage` callbacks, transferable userdata, and automated scheduler
+integration remain open.
 
 ## Phase 9: Optional Integrations and Release Readiness
 

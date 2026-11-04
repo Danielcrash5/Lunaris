@@ -5,12 +5,15 @@
 
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 
 namespace lunaris {
+
+class State;
 
 /// Host-side, scheduler-neutral actor mailbox and message dispatcher.
 /// The host must invoke dispatch methods on the Actor's chosen execution
@@ -22,6 +25,12 @@ class Actor {
     Actor() = default;
     Actor(const Actor &) = delete;
     Actor &operator=(const Actor &) = delete;
+
+    /// Installs a shared Actor handle as a Luau global. Luau can send scalar
+    /// messages to this Actor; the host remains responsible for dispatch.
+    /// The global name must be unused in the target State.
+    static void install(State &state, std::string_view globalName,
+                        std::shared_ptr<Actor> actor);
 
     /// Adds a handler for a topic. Duplicate topic bindings are rejected.
     void bind(std::string_view topic, Handler handler);

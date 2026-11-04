@@ -1,5 +1,6 @@
 #include "lunaris/Actor.h"
 #include "lunaris/Scheduler.h"
+#include "lunaris/State.h"
 
 #include <gtest/gtest.h>
 
@@ -182,4 +183,77 @@ TEST(ActorTests, HostSchedulerControlsActorDispatch) {
     auto rejected = scheduler.schedule([] {});
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().message(), "scheduler is stopping");
+}
+
+TEST(ActorTests, LuauSendsScalarMessageToHostOwnedActor) {
+    auto actor = std::make_shared<lunaris::Actor>();
+    lunaris::State sender;
+    lunaris::Actor::install(sender, "target", actor);
+
+    std::string receivedTopic;
+    lunaris::Value receivedPayload;
+    actor->bind("Update", [&](const lunaris::Message &message) {
+        receivedTopic = message.topic;
+        receivedPayload = message.payload;
+        return lunaris::Result<void>::success();
+    });
+
+    auto script = sender.load_script("return target:SendMessage('Update', 42)",
+                                     "actor-send-message.luau");
+    ASSERT_TRUE(script);
+    auto sent = script.value().execute();
+    ASSERT_TRUE(sent) << sent.error().message();
+    ASSERT_EQ(sent.value().size(), 1U);
+    EXPECT_TRUE(std::get<bool>(sent.value()[0]));
+    EXPECT_EQ(actor->pending(), 1U);
+    EXPECT_TRUE(receivedTopic.empty());
+
+    auto dispatched = actor->dispatch_pending();
+    ASSERT_TRUE(dispatched);
+    EXPECT_EQ(dispatched.value(), 1U);
+    EXPECT_EQ(receivedTopic, "Update");
+    EXPECT_EQ(std::get<double>(receivedPayload), 42.0);
+}
+
+TEST(ActorTests, LuauActorHandleRejectsUnsupportedPayloadsAndClosedActors) {
+    auto actor = std::make_shared<lunaris::Actor>();
+    lunaris::State state;
+    lunaris::Actor::install(state, "target", actor);
+
+    auto invalid = state.load_script("target:SendMessage('Update', {})",
+                                     "actor-invalid-payload.luau");
+    ASSERT_TRUE(invalid);
+    auto invalidResult = invalid.value().execute();
+    ASSERT_FALSE(invalidResult);
+    EXPECT_EQ(invalidResult.error().type(), lunaris::ErrorType::Runtime);
+
+    actor->close();
+    auto closed = state.load_script("return target:SendMessage('Update', nil)",
+                                    "actor-send-closed.luau");
+    ASSERT_TRUE(closed);
+    auto closedResult = closed.value().execute();
+    ASSERT_TRUE(closedResult) << closedResult.error().message();
+    ASSERT_EQ(closedResult.value().size(), 1U);
+    EXPECT_FALSE(std::get<bool>(closedResult.value()[0]));
+}
+
+TEST(ActorTests, LuauActorInstallationValidatesNameAndGlobal) {
+    lunaris::State state;
+    auto actor = std::make_shared<lunaris::Actor>();
+
+    EXPECT_THROW(lunaris::Actor::install(state, "", actor),
+                 std::invalid_argument);
+    EXPECT_THROW(
+        lunaris::Actor::install(state, std::string_view{"bad\0name", 8}, actor),
+        std::invalid_argument);
+    ASSERT_TRUE(state.set_global("existing", lunaris::Value{true}));
+    EXPECT_THROW(lunaris::Actor::install(state, "existing", actor),
+                 std::invalid_argument);
+    EXPECT_THROW(lunaris::Actor::install(state, "Actor", nullptr),
+                 std::invalid_argument);
+    EXPECT_NO_THROW(lunaris::Actor::install(state, "target", actor));
+    EXPECT_NO_THROW(lunaris::Actor::install(
+        state, "other", std::make_shared<lunaris::Actor>()));
+    EXPECT_THROW(lunaris::Actor::install(state, "target", actor),
+                 std::invalid_argument);
 }

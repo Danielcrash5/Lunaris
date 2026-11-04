@@ -244,6 +244,7 @@ class State {
     }
 
   private:
+    friend class Actor;
     friend class SharedTableRegistry;
     struct AllocatorContext;
 
