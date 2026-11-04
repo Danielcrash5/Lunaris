@@ -1,4 +1,4 @@
-#include "lunaris/State.hpp"
+#include "lunaris/State.h"
 
 #include <lua.h>
 
@@ -6,20 +6,12 @@
 #include <new>
 #include <utility>
 
-namespace lunaris
-{
-namespace
-{
+namespace lunaris {
+namespace {
 
-void* default_allocate(
-    void*,
-    void* pointer,
-    std::size_t,
-    std::size_t newSize
-)
-{
-    if (newSize == 0)
-    {
+void *default_allocate(void *, void *pointer, std::size_t,
+                       std::size_t newSize) {
+    if (newSize == 0) {
         std::free(pointer);
         return nullptr;
     }
@@ -29,50 +21,41 @@ void* default_allocate(
 
 } // namespace
 
-State::State(const StateConfig& config)
-{
+State::State(const StateConfig &config) {
     const auto allocate = config.allocator.allocate != nullptr
-        ? config.allocator.allocate
-        : &default_allocate;
+                              ? config.allocator.allocate
+                              : &default_allocate;
 
-    state_ = lua_newstate(allocate, config.allocator.userData);
-    if (state_ == nullptr)
-    {
+    m_state = lua_newstate(allocate, config.allocator.userData);
+    if (m_state == nullptr) {
         throw std::bad_alloc{};
     }
 }
 
-State::~State()
-{
-    if (state_ != nullptr)
-    {
-        lua_close(state_);
+State::~State() {
+    if (m_state != nullptr) {
+        lua_close(m_state);
     }
 }
 
-State::State(State&& other) noexcept
-    : state_(std::exchange(other.state_, nullptr))
-{
+State::State(State &&other) noexcept
+    : m_state(std::exchange(other.m_state, nullptr)) {
 }
 
-State& State::operator=(State&& other) noexcept
-{
-    if (this != &other)
-    {
-        if (state_ != nullptr)
-        {
-            lua_close(state_);
+State &State::operator=(State &&other) noexcept {
+    if (this != &other) {
+        if (m_state != nullptr) {
+            lua_close(m_state);
         }
 
-        state_ = std::exchange(other.state_, nullptr);
+        m_state = std::exchange(other.m_state, nullptr);
     }
 
     return *this;
 }
 
-lua_State* State::native_handle() noexcept
-{
-    return state_;
+lua_State *State::native_handle() noexcept {
+    return m_state;
 }
 
 } // namespace lunaris

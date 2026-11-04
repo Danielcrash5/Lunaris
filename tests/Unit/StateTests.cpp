@@ -1,33 +1,24 @@
-#include "lunaris/State.hpp"
+#include "lunaris/State.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdlib>
 #include <utility>
 
-namespace
-{
+namespace {
 
-struct AllocatorStats
-{
+struct AllocatorStats {
     std::size_t allocationCalls = 0;
     std::size_t freeCalls = 0;
     std::size_t activeAllocations = 0;
 };
 
-void* tracking_allocate(
-    void* userData,
-    void* pointer,
-    std::size_t,
-    std::size_t newSize
-)
-{
-    auto& stats = *static_cast<AllocatorStats*>(userData);
+void *tracking_allocate(void *userData, void *pointer, std::size_t,
+                        std::size_t newSize) {
+    auto &stats = *static_cast<AllocatorStats *>(userData);
 
-    if (newSize == 0)
-    {
-        if (pointer != nullptr)
-        {
+    if (newSize == 0) {
+        if (pointer != nullptr) {
             ++stats.freeCalls;
             --stats.activeAllocations;
         }
@@ -35,12 +26,10 @@ void* tracking_allocate(
         return nullptr;
     }
 
-    void* result = std::realloc(pointer, newSize);
-    if (result != nullptr)
-    {
+    void *result = std::realloc(pointer, newSize);
+    if (result != nullptr) {
         ++stats.allocationCalls;
-        if (pointer == nullptr)
-        {
+        if (pointer == nullptr) {
             ++stats.activeAllocations;
         }
     }
@@ -50,15 +39,13 @@ void* tracking_allocate(
 
 } // namespace
 
-TEST(StateTests, CreatesAndOwnsLuauState)
-{
+TEST(StateTests, CreatesAndOwnsLuauState) {
     lunaris::State state;
 
     EXPECT_NE(state.native_handle(), nullptr);
 }
 
-TEST(StateTests, UsesConfiguredAllocatorUntilStateDestruction)
-{
+TEST(StateTests, UsesConfiguredAllocatorUntilStateDestruction) {
     AllocatorStats stats;
     lunaris::StateConfig config;
     config.allocator = {&tracking_allocate, &stats};
@@ -74,10 +61,9 @@ TEST(StateTests, UsesConfiguredAllocatorUntilStateDestruction)
     EXPECT_GT(stats.freeCalls, 0U);
 }
 
-TEST(StateTests, MoveTransfersStateOwnership)
-{
+TEST(StateTests, MoveTransfersStateOwnership) {
     lunaris::State original;
-    auto* const handle = original.native_handle();
+    auto *const handle = original.native_handle();
 
     lunaris::State moved(std::move(original));
 

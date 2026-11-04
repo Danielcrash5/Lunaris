@@ -1834,10 +1834,10 @@ tests/
 │   ├── BytecodeCachePersistenceTests.cpp
 │   └── SchedulerIntegrationTests.cpp
 ├── TestUtils/
-│   ├── LuauTestFixture.hpp
-│   ├── TestAllocator.hpp
-│   ├── InMemoryCacheStorage.hpp
-│   └── TestSourceProvider.hpp
+│   ├── LuauTestFixture.h
+│   ├── TestAllocator.h
+│   ├── InMemoryCacheStorage.h
+│   └── TestSourceProvider.h
 └── data/
     └── scripts/
 ```
@@ -1977,43 +1977,46 @@ Axiom can therefore optionally remove source `.luau` files from shipped builds.
 
 Recommended repository:
 
+Lunaris headers use the `.h` extension. The repository-root `.clang-format`
+keeps opening braces for classes and functions on the same line.
+
 ```text
 Lunaris/
 ├── include/
 │   └── lunaris/
-│       ├── State.hpp
-│       ├── Value.hpp
-│       ├── Table.hpp
-│       ├── Function.hpp
-│       ├── Thread.hpp
-│       ├── Userdata.hpp
-│       ├── Error.hpp
-│       ├── Allocator.hpp
-│       ├── Compiler.hpp
-│       ├── Bytecode.hpp
-│       ├── BytecodeCache.hpp
-│       ├── Script.hpp
-│       ├── Module.hpp
-│       ├── ScriptManager.hpp
-│       ├── ModuleCache.hpp
+│       ├── State.h
+│       ├── Value.h
+│       ├── Table.h
+│       ├── Function.h
+│       ├── Thread.h
+│       ├── Userdata.h
+│       ├── Error.h
+│       ├── Allocator.h
+│       ├── Compiler.h
+│       ├── Bytecode.h
+│       ├── BytecodeCache.h
+│       ├── Script.h
+│       ├── Module.h
+│       ├── ScriptManager.h
+│       ├── ModuleCache.h
 │       │
 │       ├── Binding/
-│       │   ├── Usertype.hpp
-│       │   ├── Property.hpp
-│       │   ├── Constructor.hpp
-│       │   ├── Overload.hpp
-│       │   └── Enum.hpp
+│       │   ├── Usertype.h
+│       │   ├── Property.h
+│       │   ├── Constructor.h
+│       │   ├── Overload.h
+│       │   └── Enum.h
 │       │
 │       └── Libraries/
-│           ├── Library.hpp
+│           ├── Library.h
 │           └── Threading/
-│               ├── Actor.hpp
-│               ├── SharedTable.hpp
-│               ├── SharedTableRegistry.hpp
-│               ├── Message.hpp
-│               ├── Future.hpp
-│               ├── TaskHandle.hpp
-│               └── ExecutionContext.hpp
+│               ├── Actor.h
+│               ├── SharedTable.h
+│               ├── SharedTableRegistry.h
+│               ├── Message.h
+│               ├── Future.h
+│               ├── TaskHandle.h
+│               └── ExecutionContext.h
 │
 ├── src/
 ├── tests/
@@ -2035,39 +2038,39 @@ Lunaris/
 Lunaris/
 ├── include/
 │   └── lunaris/
-│       ├── State.hpp
-│           ├── Value.hpp
-│           ├── Table.hpp
-│           ├── Function.hpp
-│           ├── Thread.hpp
-│           ├── Userdata.hpp
-│           ├── Error.hpp
-│           ├── Allocator.hpp
-│           ├── Compiler.hpp
-│           ├── Bytecode.hpp
-│           ├── BytecodeCache.hpp
-│           ├── Script.hpp
-│           ├── Module.hpp
-│           ├── ScriptManager.hpp
-│           ├── ModuleCache.hpp
+│       ├── State.h
+│           ├── Value.h
+│           ├── Table.h
+│           ├── Function.h
+│           ├── Thread.h
+│           ├── Userdata.h
+│           ├── Error.h
+│           ├── Allocator.h
+│           ├── Compiler.h
+│           ├── Bytecode.h
+│           ├── BytecodeCache.h
+│           ├── Script.h
+│           ├── Module.h
+│           ├── ScriptManager.h
+│           ├── ModuleCache.h
 │           │
 │           ├── Binding/
-│           │   ├── Usertype.hpp
-│           │   ├── Property.hpp
-│           │   ├── Constructor.hpp
-│           │   ├── Overload.hpp
-│           │   └── Enum.hpp
+│           │   ├── Usertype.h
+│           │   ├── Property.h
+│           │   ├── Constructor.h
+│           │   ├── Overload.h
+│           │   └── Enum.h
 │           │
 │           └── Libraries/
-│               ├── Library.hpp
+│               ├── Library.h
 │               └── Threading/
-│                   ├── Actor.hpp
-│                   ├── SharedTable.hpp
-│                   ├── SharedTableRegistry.hpp
-│                   ├── Message.hpp
-│                   ├── Future.hpp
-│                   ├── TaskHandle.hpp
-│                   └── ExecutionContext.hpp
+│                   ├── Actor.h
+│                   ├── SharedTable.h
+│                   ├── SharedTableRegistry.h
+│                   ├── Message.h
+│                   ├── Future.h
+│                   ├── TaskHandle.h
+│                   └── ExecutionContext.h
 │
 ├── src/
 ├── tests/
