@@ -42,6 +42,12 @@ class StackRestore {
 
 struct ActorUserdata {
     std::shared_ptr<Actor> actor;
+    std::weak_ptr<detail::StateLifetime> lifetime;
+};
+
+struct ActorLuaCallback {
+    std::weak_ptr<detail::StateLifetime> lifetime;
+    int reference = LUA_NOREF;
 };
 
 void destroy_actor_userdata(lua_State *, void *data) {
@@ -99,6 +105,98 @@ Value read_message_value(lua_State *state, int index) {
     }
 }
 
+void push_message_value(lua_State *state, const Value &value) {
+    std::visit(
+        [state](const auto &item) {
+            using T = std::decay_t<decltype(item)>;
+            if constexpr (std::same_as<T, std::monostate>) {
+                lua_pushnil(state);
+            } else if constexpr (std::same_as<T, bool>) {
+                lua_pushboolean(state, item);
+            } else if constexpr (std::same_as<T, std::int64_t>) {
+                lua_pushinteger64(state, item);
+            } else if constexpr (std::same_as<T, double>) {
+                lua_pushnumber(state, item);
+            } else {
+                lua_pushlstring(state, item.data(), item.size());
+            }
+        },
+        value);
+}
+
+std::string read_luau_error(lua_State *state) {
+    std::size_t length = 0;
+    const char *message = lua_tolstring(state, -1, &length);
+    if (message == nullptr) {
+        return "Luau actor handler failed with a non-string error value";
+    }
+    return std::string(message, length);
+}
+
+int actor_bind_message(lua_State *state) {
+    return detail::invoke_protected(state, [state] {
+        if (lua_gettop(state) != 3) {
+            throw std::invalid_argument(
+                "Actor:BindToMessage expects a topic and function");
+        }
+        auto *userdata = get_actor_userdata(state, 1);
+        if (lua_type(state, 2) != LUA_TSTRING) {
+            throw std::invalid_argument("actor message topic must be a string");
+        }
+        if (lua_type(state, 3) != LUA_TFUNCTION) {
+            throw std::invalid_argument(
+                "actor message handler must be a function");
+        }
+        const auto lifetime = userdata->lifetime.lock();
+        if (!lifetime || lifetime->state != state) {
+            throw std::logic_error(
+                "Actor handle is not bound to this Luau State");
+        }
+
+        std::size_t length = 0;
+        const char *topic = lua_tolstring(state, 2, &length);
+        auto callback = std::make_shared<ActorLuaCallback>();
+        callback->lifetime = lifetime;
+        callback->reference = lua_ref(state, 3);
+
+        const std::string ownedTopic(topic, length);
+        try {
+            userdata->actor->bind(
+                ownedTopic, [callback](const Message &message) -> Result<void> {
+                    const auto callbackLifetime = callback->lifetime.lock();
+                    if (!callbackLifetime ||
+                        callbackLifetime->state == nullptr) {
+                        return Result<void>::failure(Error(
+                            ErrorType::Runtime,
+                            "Actor handler State is no longer available"));
+                    }
+                    lua_State *callbackState = callbackLifetime->state;
+                    StackRestore restore(callbackState);
+                    lua_getref(callbackState, callback->reference);
+                    if (lua_type(callbackState, -1) != LUA_TFUNCTION) {
+                        return Result<void>::failure(Error(
+                            ErrorType::Runtime,
+                            "Actor handler reference is no longer valid"));
+                    }
+                    push_message_value(callbackState, message.payload);
+                    const int status = lua_pcall(callbackState, 1, 0, 0);
+                    if (status != LUA_OK) {
+                        const ErrorType type = status == LUA_ERRMEM
+                                                   ? ErrorType::Memory
+                                                   : ErrorType::Runtime;
+                        return Result<void>::failure(
+                            Error(type, read_luau_error(callbackState)));
+                    }
+                    return Result<void>::success();
+                });
+        } catch (...) {
+            lua_unref(state, callback->reference);
+            throw;
+        }
+        return 0;
+    });
+}
+
 int actor_send_message(lua_State *state) {
     return detail::invoke_protected(state, [state] {
         if (lua_gettop(state) != 3) {
@@ -127,8 +225,12 @@ int actor_index(lua_State *state) {
         }
         std::size_t length = 0;
         const char *key = lua_tolstring(state, 2, &length);
-        if (std::string_view(key, length) == "SendMessage") {
+        const std::string_view method(key, length);
+        if (method == "SendMessage") {
             lua_pushcclosure(state, actor_send_message, "Actor.SendMessage", 0);
+        } else if (method == "BindToMessage") {
+            lua_pushcclosure(state, actor_bind_message, "Actor.BindToMessage",
+                             0);
         } else {
             lua_pushnil(state);
         }
@@ -292,7 +394,7 @@ void Actor::install(State &state, std::string_view globalName,
     if (userdata == nullptr) {
         throw std::bad_alloc{};
     }
-    new (userdata) ActorUserdata{std::move(actor)};
+    new (userdata) ActorUserdata{std::move(actor), state.m_lifetime};
     lua_getfield(lua, LUA_REGISTRYINDEX, kActorMetatable);
     if (lua_type(lua, -1) != LUA_TTABLE) {
         throw std::runtime_error("Actor metatable is not installed");

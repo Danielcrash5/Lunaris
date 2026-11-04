@@ -1775,6 +1775,14 @@ The handle is a destination; it does not dispatch automatically. A handler
 registered through the C++ `Actor::bind()` API runs only when the host calls
 dispatch on the Actor's designated context.
 
+Luau can also bind one callback per topic with
+`target:BindToMessage(topic, callback)`. The callback receives the scalar
+payload and runs only during host-driven dispatch. Dispatch must occur on the
+owning State's execution context; a Luau State must never be accessed
+concurrently. Callback references are owned by the State and released when
+that State closes. Callback failures are returned as dispatch errors, and the
+failing message is consumed.
+
 ```lua
 actor:SendMessage(
     "SpawnEnemy",
@@ -2442,9 +2450,10 @@ scheduler. The scheduler-neutral C++ `MessageQueue` provides ordered FIFO
 delivery of topic/payload messages, blocking and non-blocking receive, and
 drain-on-close behavior. A host-owned `Scheduler` interface and C++ `Actor`
 mailbox/handler seam provide explicit, host-driven dispatch. Luau Actor handles
-can send scalar messages to C++-bound handlers. Luau `await`, task spawning,
-Luau `BindToMessage` callbacks, transferable userdata, and automated scheduler
-integration remain open.
+can send scalar messages to C++-bound handlers and bind Luau callbacks that
+execute during host-driven dispatch. Luau `await`, task spawning, parallel
+message callbacks, transferable userdata, and automated scheduler integration
+remain open.
 
 ## Phase 9: Optional Integrations and Release Readiness
 

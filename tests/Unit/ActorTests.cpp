@@ -257,3 +257,85 @@ TEST(ActorTests, LuauActorInstallationValidatesNameAndGlobal) {
     EXPECT_THROW(lunaris::Actor::install(state, "target", actor),
                  std::invalid_argument);
 }
+
+TEST(ActorTests, LuauBindToMessageRunsCallbackDuringHostDispatch) {
+    auto actor = std::make_shared<lunaris::Actor>();
+    lunaris::State state;
+    lunaris::Actor::install(state, "target", actor);
+
+    auto script = state.load_script(
+        "target:BindToMessage('Update', function(payload) "
+        "received = payload end); target:SendMessage('Update', 'ready')",
+        "actor-bind-to-message.luau");
+    ASSERT_TRUE(script);
+    auto result = script.value().execute();
+    ASSERT_TRUE(result) << result.error().message();
+    auto beforeDispatch = script.value().get_global("received");
+    ASSERT_TRUE(beforeDispatch);
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(beforeDispatch.value()));
+
+    auto dispatched = actor->dispatch_pending();
+    ASSERT_TRUE(dispatched) << dispatched.error().message();
+    EXPECT_EQ(dispatched.value(), 1U);
+    auto received = script.value().get_global("received");
+    ASSERT_TRUE(received);
+    EXPECT_EQ(std::get<std::string>(received.value()), "ready");
+}
+
+TEST(ActorTests, LuauHandlerErrorsAreReturnedFromDispatch) {
+    auto actor = std::make_shared<lunaris::Actor>();
+    lunaris::State state;
+    lunaris::Actor::install(state, "target", actor);
+
+    auto script = state.load_script("target:BindToMessage('Fail', function() "
+                                    "error('actor callback failed') "
+                                    "end); target:SendMessage('Fail', nil)",
+                                    "actor-handler-error.luau");
+    ASSERT_TRUE(script);
+    ASSERT_TRUE(script.value().execute());
+
+    auto dispatched = actor->dispatch_one();
+    ASSERT_FALSE(dispatched);
+    EXPECT_EQ(dispatched.error().type(), lunaris::ErrorType::Runtime);
+    EXPECT_FALSE(dispatched.error().message().empty());
+}
+
+TEST(ActorTests, LuauBindingRejectsInvalidAndDuplicateHandlers) {
+    auto actor = std::make_shared<lunaris::Actor>();
+    lunaris::State state;
+    lunaris::Actor::install(state, "target", actor);
+
+    auto invalid = state.load_script("target:BindToMessage('Update', {})",
+                                     "actor-invalid-handler.luau");
+    ASSERT_TRUE(invalid);
+    EXPECT_FALSE(invalid.value().execute());
+
+    auto duplicate =
+        state.load_script("target:BindToMessage('Update', function() end); "
+                          "target:BindToMessage('Update', function() end)",
+                          "actor-duplicate-handler.luau");
+    ASSERT_TRUE(duplicate);
+    auto duplicateResult = duplicate.value().execute();
+    ASSERT_FALSE(duplicateResult);
+    EXPECT_EQ(duplicateResult.error().type(), lunaris::ErrorType::Runtime);
+}
+
+TEST(ActorTests, LuauHandlerReportsWhenItsStateHasClosed) {
+    auto actor = std::make_shared<lunaris::Actor>();
+    {
+        lunaris::State state;
+        lunaris::Actor::install(state, "target", actor);
+        auto script =
+            state.load_script("target:BindToMessage('Update', function() end)",
+                              "actor-handler-state-lifetime.luau");
+        ASSERT_TRUE(script);
+        ASSERT_TRUE(script.value().execute());
+    }
+
+    ASSERT_TRUE(actor->send("Update", lunaris::Value{}));
+    auto dispatched = actor->dispatch_one();
+    ASSERT_FALSE(dispatched);
+    EXPECT_EQ(dispatched.error().type(), lunaris::ErrorType::Runtime);
+    EXPECT_NE(dispatched.error().message().find("State is no longer available"),
+              std::string_view::npos);
+}
