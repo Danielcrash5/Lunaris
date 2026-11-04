@@ -2125,41 +2125,113 @@ Lunaris/
 
 # 49. Implementation Order
 
-Each implementation step must include its corresponding GoogleTest unit tests before the next dependent feature is considered complete.
+Implement the project in phases. Each feature must include its relevant
+GoogleTest coverage and documentation before dependent work begins. Keep each
+phase reviewable and working; do not start a later phase while its prerequisites
+are unstable.
 
-1. State
-2. StateConfig
-3. Custom Allocator
-4. Value
-5. Stack
-6. Table
-7. Function
-8. Error Handling
-9. Userdata
-10. Usertype Binding
-11. Properties
-12. Constructors
-13. Overloads
-14. Enums
-15. Library System
-16. Compiler
-17. Bytecode
-18. Bytecode Cache
-19. Script
-20. Script Environment
-21. Standalone Script Hot Reload
-22. Module
-23. Module Cache
-24. Module Hot Reload
-25. Dependency Graph
-26. Actor
-27. SharedTable
-28. SharedTableRegistry
-29. Future
-30. Scheduler Integration
-31. GLM Extension
-32. Reflection Integration
-33. `.d.luau` Generation
+## Phase 0: Existing Foundation
+
+- CMake build with vendored Luau and GoogleTest.
+- RAII-owned `State`, movable but not copyable.
+- `StateConfig` and custom allocator support.
+- Unit tests for State lifetime, allocator use, and move ownership.
+
+This is the current starting point.
+
+## Phase 1: State Resources and Core Values
+
+- Add the optional per-State Luau memory limit, including correct accounting
+  for allocate, reallocate, free, and allocation failure.
+- Implement `Value` and safe conversions.
+- Implement stack access and stack-balance guarantees.
+- Implement `Table` access and mutation.
+- Define structured errors and error propagation for invalid operations.
+
+**Exit criteria:** boundary and failure cases are tested; a failed allocation
+or operation leaves the State and stack in a documented, usable state.
+
+## Phase 2: Globals and Function Calls
+
+- Implement global get/set.
+- Implement Luau function handles and protected calls.
+- Support argument and return-value conversion.
+- Preserve structured compile/runtime/type error details where available.
+
+**Exit criteria:** end-to-end tests cover values crossing the C++/Luau
+boundary, successful calls, and error paths.
+
+## Phase 3: C++ Bindings
+
+- Implement userdata ownership policies.
+- Add usertype binding, methods, and properties.
+- Add constructors, overloads, enums, and flags.
+- Add the library registration system.
+
+**Exit criteria:** lifetime, invalid-type, ownership, and repeated-registration
+behavior is documented and tested.
+
+## Phase 4: Compilation and Bytecode
+
+- Add compiler configuration and compilation.
+- Add bytecode ownership, loading, and version checks.
+- Add bytecode cache and pluggable cache storage.
+
+**Exit criteria:** source-to-bytecode-to-execution and cache invalidation paths
+are covered by integration tests.
+
+## Phase 5: Scripts and Environments
+
+- Add standalone script loading and execution.
+- Add script environments and documented isolation behavior.
+- Implement the agreed reload modes and standalone-script hot reload.
+
+**Exit criteria:** scripts can execute independently; reload and failure
+behavior are covered without leaking or corrupting environments.
+
+## Phase 6: Module Loader
+
+- Implement unified Luau `require(...)` through Lunaris' Module Loader.
+- Add configurable base path, multiple search paths, and an optional module
+  catalog.
+- Add canonical identifiers, module caching, dependency tracking, and reload.
+- Reject ambiguous resolutions while deduplicating results with the same
+  canonical module identifier.
+
+**Exit criteria:** tests cover provider resolution, paths, catalog behavior,
+cache behavior, cycles/failures, dependency invalidation, and reload.
+
+## Phase 7: Optional LuaRocks and Native Modules
+
+- Add `LUNARIS_ENABLE_LUAROCKS`, disabled by default.
+- Resolve already-installed, Luau-compatible package contents through the same
+  `require(...)` entry point; package installation remains out of scope.
+- Define and validate the supported native module ABI before loading C modules.
+- Fail clearly for incompatible modules or unsupported package metadata.
+
+**Exit criteria:** both build configurations are tested. Native module loading
+is documented as trusted native code, not a sandbox boundary.
+
+## Phase 8: Concurrency and Shared State
+
+- Implement SharedTable and SharedTableRegistry with explicit value rules.
+- Implement Futures and message passing.
+- Add Actors and scheduler integration through a generic host seam; the
+  consuming application owns scheduling.
+
+**Exit criteria:** ownership, ordering, cancellation, and synchronization
+contracts are documented and deterministically tested.
+
+## Phase 9: Optional Integrations and Release Readiness
+
+- Add the optional GLM extension.
+- Add reflection integration above the standalone wrapper.
+- Add `.d.luau` generation.
+- Run the supported compiler/platform matrix, performance benchmarks, and
+  API-stability review.
+
+**Exit criteria:** optional integrations remain independently buildable, and
+the documented public API matches tested behavior.
 
 ---
 
