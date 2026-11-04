@@ -512,9 +512,17 @@ duplicate registration, and C++ exceptions are reported as Luau runtime
 errors or registration exceptions. Userdata destruction follows Luau garbage
 collection and State teardown.
 
-Borrowed/shared userdata, actor transfers, getter/setter properties,
-overloaded methods and constructors, enums, flags, and library registration
-are not part of this first binding slice.
+Properties may also use a no-argument member getter and an optional
+one-argument void setter:
+
+```cpp
+property("Health", &Player::GetHealth, &Player::SetHealth)
+property("Name", &Player::GetName)
+```
+
+Borrowed/shared userdata, actor transfers, overloaded methods and constructors,
+enums, flags, and library registration are not part of this first binding
+slice.
 
 ---
 
@@ -2221,8 +2229,8 @@ boundary, successful calls, and error paths.
 - Add the library registration system.
 
 The first local-userdata slice is implemented: owned usertypes, one
-constructor signature, data-member properties, and non-overloaded methods.
-Borrowed/shared ownership, richer properties, overloads, enums/flags, and
+constructor signature, data-member and getter/setter properties, and
+non-overloaded methods. Borrowed/shared ownership, overloads, enums/flags, and
 library registration remain open.
 
 **Exit criteria:** lifetime, invalid-type, ownership, and repeated-registration

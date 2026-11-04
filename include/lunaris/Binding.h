@@ -18,6 +18,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace lunaris {
@@ -39,10 +40,25 @@ template <typename Class, typename Member> struct PropertyDescriptor {
 
 /// Creates a read/write property, or a read-only property for const members.
 template <typename Class, typename Member>
+    requires(!std::is_function_v<Member>)
 [[nodiscard]] PropertyDescriptor<Class, Member>
 property(std::string_view name, Member Class::*member) {
     return {std::string(name), member};
 }
+
+/// Describes a read-only property backed by a getter.
+template <typename Class, typename Getter> struct GetterPropertyDescriptor {
+    std::string name;
+    Getter getter;
+};
+
+/// Describes a property backed by a getter and setter.
+template <typename Class, typename Getter, typename Setter>
+struct GetterSetterPropertyDescriptor {
+    std::string name;
+    Getter getter;
+    Setter setter;
+};
 
 /// Describes a non-overloaded C++ member function on a usertype.
 template <typename Class, typename Method> struct MethodDescriptor {
@@ -71,6 +87,30 @@ struct MemberFunctionClass<Return (Class::*)(Args...) const noexcept> {
 };
 
 } // namespace detail
+
+/// Creates a read-only property backed by a no-argument member getter.
+template <typename Getter>
+    requires requires { typename detail::MemberFunctionClass<Getter>::Type; }
+[[nodiscard]] auto property(std::string_view name, Getter getter) {
+    using Class = typename detail::MemberFunctionClass<Getter>::Type;
+    return GetterPropertyDescriptor<Class, Getter>{std::string(name), getter};
+}
+
+/// Creates a property backed by a no-argument getter and one-argument setter.
+template <typename Getter, typename Setter>
+    requires requires {
+        typename detail::MemberFunctionClass<Getter>::Type;
+        typename detail::MemberFunctionClass<Setter>::Type;
+    }
+[[nodiscard]] auto property(std::string_view name, Getter getter,
+                            Setter setter) {
+    using Class = typename detail::MemberFunctionClass<Getter>::Type;
+    static_assert(
+        std::same_as<Class, typename detail::MemberFunctionClass<Setter>::Type>,
+        "property getter and setter must belong to the same type");
+    return GetterSetterPropertyDescriptor<Class, Getter, Setter>{
+        std::string(name), getter, setter};
+}
 
 /// Creates a descriptor for a non-overloaded member function.
 template <typename Method>
@@ -410,18 +450,22 @@ class DefaultUserdataConstructor final : public UserdataConstructor {
 template <typename Method> struct MethodTraits;
 template <typename R, typename Class, typename... Args>
 struct MethodTraits<R (Class::*)(Args...)> {
+    using Return = R;
     using Arguments = std::tuple<Args...>;
 };
 template <typename R, typename Class, typename... Args>
 struct MethodTraits<R (Class::*)(Args...) const> {
+    using Return = R;
     using Arguments = std::tuple<Args...>;
 };
 template <typename R, typename Class, typename... Args>
 struct MethodTraits<R (Class::*)(Args...) noexcept> {
+    using Return = R;
     using Arguments = std::tuple<Args...>;
 };
 template <typename R, typename Class, typename... Args>
 struct MethodTraits<R (Class::*)(Args...) const noexcept> {
+    using Return = R;
     using Arguments = std::tuple<Args...>;
 };
 
@@ -525,6 +569,76 @@ class FieldProperty final : public UserdataMember {
     const UserdataType *m_type;
 };
 
+template <typename T, typename Getter, typename Setter>
+class AccessorProperty final : public UserdataMember {
+  public:
+    AccessorProperty(std::string name, Getter getter, const UserdataType *type)
+        requires std::same_as<Setter, std::monostate>
+        : m_name(std::move(name)), m_getter(getter), m_type(type) {
+        validate_getter();
+    }
+
+    AccessorProperty(std::string name, Getter getter, Setter setter,
+                     const UserdataType *type)
+        requires(!std::same_as<Setter, std::monostate>)
+        : m_name(std::move(name)), m_getter(getter), m_setter(setter),
+          m_type(type) {
+        validate_getter();
+        using SetterTraits = MethodTraits<Setter>;
+        static_assert(std::tuple_size_v<typename SetterTraits::Arguments> == 1,
+                      "property setter must take exactly one argument");
+        static_assert(std::is_void_v<typename SetterTraits::Return>,
+                      "property setter must return void");
+    }
+
+    [[nodiscard]] std::string_view name() const noexcept override {
+        return m_name;
+    }
+    [[nodiscard]] Kind kind() const noexcept override {
+        return Kind::Property;
+    }
+    int get(lua_State *state) override {
+        auto *object = get_userdata<T>(state, 1, *m_type);
+        decltype(auto) value = std::invoke(m_getter, *object);
+        return push_return(state, std::forward<decltype(value)>(value));
+    }
+    int set(lua_State *state) override {
+        if constexpr (std::same_as<Setter, std::monostate>) {
+            throw std::invalid_argument("property '" + m_name +
+                                        "' is read-only");
+        } else {
+            if (lua_gettop(state) != 3) {
+                throw std::invalid_argument("property setter '" + m_name +
+                                            "' received the wrong number of "
+                                            "arguments");
+            }
+            auto *object = get_userdata<T>(state, 1, *m_type);
+            using Arguments = typename MethodTraits<Setter>::Arguments;
+            using Argument = std::tuple_element_t<0, Arguments>;
+            auto value = read_argument<Argument>(state, 3);
+            std::invoke(m_setter, *object, std::move(value));
+            return 0;
+        }
+    }
+    int call(lua_State *) override {
+        throw std::logic_error("property is not callable");
+    }
+
+  private:
+    static void validate_getter() {
+        using GetterTraits = MethodTraits<Getter>;
+        static_assert(std::tuple_size_v<typename GetterTraits::Arguments> == 0,
+                      "property getter must take no arguments");
+        static_assert(!std::is_void_v<typename GetterTraits::Return>,
+                      "property getter must return a value");
+    }
+
+    std::string m_name;
+    Getter m_getter;
+    [[no_unique_address]] Setter m_setter;
+    const UserdataType *m_type;
+};
+
 template <typename T, typename Class, typename Member>
 void add_descriptor(const std::shared_ptr<UserdataType> &type,
                     PropertyDescriptor<Class, Member> descriptor) {
@@ -536,6 +650,36 @@ void add_descriptor(const std::shared_ptr<UserdataType> &type,
     }
     type->members.push_back(std::make_unique<FieldProperty<T, Member>>(
         std::move(descriptor.name), descriptor.member, type.get()));
+}
+
+template <typename T, typename Class, typename Getter>
+void add_descriptor(const std::shared_ptr<UserdataType> &type,
+                    GetterPropertyDescriptor<Class, Getter> descriptor) {
+    static_assert(std::same_as<T, Class>,
+                  "property belongs to a different usertype");
+    if (type->find(descriptor.name) != nullptr) {
+        throw std::invalid_argument("duplicate usertype member '" +
+                                    descriptor.name + "'");
+    }
+    type->members.push_back(
+        std::make_unique<AccessorProperty<T, Getter, std::monostate>>(
+            std::move(descriptor.name), descriptor.getter, type.get()));
+}
+
+template <typename T, typename Class, typename Getter, typename Setter>
+void add_descriptor(
+    const std::shared_ptr<UserdataType> &type,
+    GetterSetterPropertyDescriptor<Class, Getter, Setter> descriptor) {
+    static_assert(std::same_as<T, Class>,
+                  "property belongs to a different usertype");
+    if (type->find(descriptor.name) != nullptr) {
+        throw std::invalid_argument("duplicate usertype member '" +
+                                    descriptor.name + "'");
+    }
+    type->members.push_back(
+        std::make_unique<AccessorProperty<T, Getter, Setter>>(
+            std::move(descriptor.name), descriptor.getter, descriptor.setter,
+            type.get()));
 }
 
 template <typename T, typename Class, typename Method>

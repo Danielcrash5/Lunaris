@@ -19,7 +19,16 @@ struct Counter {
         return value;
     }
 
+    int get_health() const {
+        return health;
+    }
+
+    void set_health(int newHealth) {
+        health = newHealth;
+    }
+
     int value;
+    int health = 100;
     const int identifier = 7;
 };
 
@@ -46,20 +55,25 @@ TEST(BindingTests, RegistersOwnedUsertypesWithPropertiesAndMethods) {
         "Counter", lunaris::constructor<Counter, int>(),
         lunaris::property("value", &Counter::value),
         lunaris::property("identifier", &Counter::identifier),
+        lunaris::property("health", &Counter::get_health, &Counter::set_health),
+        lunaris::property("currentValue", &Counter::current),
         lunaris::method("add", &Counter::add),
         lunaris::method("current", &Counter::current));
 
     auto script = state.load_script("local counter = Counter.new(4); "
                                     "counter:add(3); counter.value = 9; "
-                                    "return counter:current(), counter.value",
+                                    "counter.health = 75; "
+                                    "return counter:current(), "
+                                    "counter.currentValue, counter.health",
                                     "binding-test.luau");
     ASSERT_TRUE(script);
     auto result = script.value().execute();
 
     ASSERT_TRUE(result) << result.error().message();
-    ASSERT_EQ(result.value().size(), 2U);
+    ASSERT_EQ(result.value().size(), 3U);
     EXPECT_EQ(std::get<std::int64_t>(result.value()[0]), 9);
     EXPECT_EQ(std::get<std::int64_t>(result.value()[1]), 9);
+    EXPECT_EQ(std::get<std::int64_t>(result.value()[2]), 75);
 }
 
 TEST(BindingTests, ReportsInvalidPropertyTypesAndUsertypeMismatches) {
@@ -68,6 +82,8 @@ TEST(BindingTests, ReportsInvalidPropertyTypesAndUsertypeMismatches) {
         "Counter", lunaris::constructor<Counter, int>(),
         lunaris::property("value", &Counter::value),
         lunaris::property("identifier", &Counter::identifier),
+        lunaris::property("health", &Counter::get_health, &Counter::set_health),
+        lunaris::property("currentValue", &Counter::current),
         lunaris::method("current", &Counter::current));
     state.new_usertype<LifetimeProbe>("LifetimeProbe",
                                       lunaris::constructor<LifetimeProbe>());
@@ -90,6 +106,26 @@ TEST(BindingTests, ReportsInvalidPropertyTypesAndUsertypeMismatches) {
     EXPECT_NE(readOnlyResult.error().message().find("read-only"),
               std::string_view::npos)
         << readOnlyResult.error().message();
+
+    auto readOnlyGetter = state.load_script(
+        "local counter = Counter.new(1); counter.currentValue = 2",
+        "read-only-getter.luau");
+    ASSERT_TRUE(readOnlyGetter);
+    auto readOnlyGetterResult = readOnlyGetter.value().execute();
+    ASSERT_FALSE(readOnlyGetterResult);
+    EXPECT_NE(readOnlyGetterResult.error().message().find("read-only"),
+              std::string_view::npos)
+        << readOnlyGetterResult.error().message();
+
+    auto invalidSetter = state.load_script(
+        "local counter = Counter.new(1); counter.health = 'wrong'",
+        "invalid-setter.luau");
+    ASSERT_TRUE(invalidSetter);
+    auto invalidSetterResult = invalidSetter.value().execute();
+    ASSERT_FALSE(invalidSetterResult);
+    EXPECT_NE(
+        invalidSetterResult.error().message().find("expected an in-range"),
+        std::string_view::npos);
 
     auto badArity = state.load_script("local counter = Counter.new(1, 2)",
                                       "bad-constructor-arity.luau");
