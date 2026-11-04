@@ -1745,6 +1745,12 @@ It is an isolated Luau execution context scheduled by the engine scheduler.
 
 Message passing is the primary cross-Actor communication mechanism.
 
+The host-side `MessageQueue` is a thread-safe, unbounded FIFO of messages with
+a non-empty string topic and scalar `Value` payload. It does not own Luau
+States or schedule handlers. Concurrent sends are ordered by the queue's
+internal synchronization. Closing rejects future sends, wakes waiting
+receivers, and leaves queued messages available until drained.
+
 ```lua
 actor:SendMessage(
     "SpawnEnemy",
@@ -2408,8 +2414,10 @@ registry instances, per-operation thread safety, cross-State sharing,
 scalar/nested-table values, nil removal, and unsupported-value rejection.
 The host-side `Promise<T>`/`Future<T>` primitives are also implemented with
 single-consumer results, error propagation, cancellation, and no built-in
-scheduler. Luau `await`, task spawning, message passing, transferable userdata,
-and Actors remain open.
+scheduler. The scheduler-neutral C++ `MessageQueue` provides ordered FIFO
+delivery of topic/payload messages, blocking and non-blocking receive, and
+drain-on-close behavior. Luau `await`, task spawning, scheduler dispatch,
+transferable userdata, and Actors remain open.
 
 ## Phase 9: Optional Integrations and Release Readiness
 

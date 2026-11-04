@@ -7,6 +7,7 @@ add_executable(lunaris_tests
     Unit/ErrorTests.cpp
     Unit/FutureTests.cpp
     Unit/GlobalTests.cpp
+    Unit/MessageQueueTests.cpp
     Unit/ModuleLoaderTests.cpp
     Unit/ModuleRequireTests.cpp
     Unit/ScriptTests.cpp
