@@ -19,11 +19,17 @@ TEST(ValueStackTests, PushesAndReadsScalarTypes) {
     state.push(std::string("Luau\0string", 11));
 
     EXPECT_EQ(state.top(), 5);
-    EXPECT_TRUE(std::holds_alternative<std::monostate>(state.get<lunaris::Value>(1)));
+    EXPECT_TRUE(
+        std::holds_alternative<std::monostate>(state.get<lunaris::Value>(1)));
     EXPECT_TRUE(state.get<bool>(2));
     EXPECT_EQ(state.get<int>(3), -42);
     EXPECT_DOUBLE_EQ(state.get<double>(4), 3.5);
     EXPECT_EQ(state.get<std::string>(5), std::string("Luau\0string", 11));
+
+    state.push("literal");
+    EXPECT_EQ(state.get<std::string>(-1), "literal");
+    EXPECT_THROW(state.push(static_cast<const char *>(nullptr)),
+                 std::invalid_argument);
 }
 
 TEST(ValueStackTests, ReadsIntegerAsNumberAndPreservesValueKind) {
@@ -31,8 +37,8 @@ TEST(ValueStackTests, ReadsIntegerAsNumberAndPreservesValueKind) {
     state.push(std::int64_t{42});
 
     EXPECT_DOUBLE_EQ(state.get<double>(-1), 42.0);
-    EXPECT_TRUE(std::holds_alternative<std::int64_t>(
-        state.get<lunaris::Value>(-1)));
+    EXPECT_TRUE(
+        std::holds_alternative<std::int64_t>(state.get<lunaris::Value>(-1)));
 }
 
 TEST(ValueStackTests, RejectsIncompatibleTypesAndIndices) {

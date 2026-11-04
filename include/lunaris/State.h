@@ -1,10 +1,11 @@
 #pragma once
 
 #include "lunaris/StateConfig.h"
+#include "lunaris/Table.h"
 #include "lunaris/Value.h"
 
-#include <cstddef>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -64,6 +65,15 @@ class State {
     /// Pushes a string onto the Luau stack.
     void push(std::string_view value);
 
+    /// Pushes a null-terminated string onto the Luau stack.
+    /// @throws std::invalid_argument if value is nullptr.
+    void push(const char *value) {
+        if (value == nullptr) {
+            throw std::invalid_argument("string value cannot be nullptr");
+        }
+        push(std::string_view(value));
+    }
+
     /// Pushes a string onto the Luau stack.
     void push(const std::string &value) {
         push(std::string_view(value));
@@ -71,6 +81,14 @@ class State {
 
     /// Pushes an owned scalar value onto the Luau stack.
     void push(const Value &value);
+
+    /// Creates a new table and returns a registry-backed handle to it.
+    [[nodiscard]] Table create_table();
+
+    /// Creates a registry-backed handle for a table at \p index.
+    /// @throws std::out_of_range if index is invalid.
+    /// @throws std::invalid_argument if the value is not a table.
+    [[nodiscard]] Table get_table(int index);
 
     /// Pushes an integer onto the Luau stack.
     template <std::integral T>
@@ -91,8 +109,7 @@ class State {
     /// @throws std::out_of_range if index is invalid.
     /// @throws std::invalid_argument if the stack value has an incompatible
     /// type.
-    template <typename T>
-    [[nodiscard]] T get(int index) const {
+    template <typename T> [[nodiscard]] T get(int index) const {
         validate_index(index);
 
         if constexpr (std::same_as<T, Value>) {
@@ -102,7 +119,8 @@ class State {
         } else if constexpr (std::integral<T>) {
             const std::int64_t value = get_integer(index);
             if (!std::in_range<T>(value)) {
-                throw std::out_of_range("Luau integer is outside the target range");
+                throw std::out_of_range(
+                    "Luau integer is outside the target range");
             }
             return static_cast<T>(value);
         } else if constexpr (std::same_as<T, double>) {
@@ -127,8 +145,9 @@ class State {
     static void *tracked_allocate(void *userData, void *pointer,
                                   std::size_t oldSize, std::size_t newSize);
 
-    lua_State* m_state = nullptr;
+    lua_State *m_state = nullptr;
     std::unique_ptr<AllocatorContext> m_allocatorContext;
+    std::shared_ptr<detail::StateLifetime> m_lifetime;
 };
 
 } // namespace lunaris

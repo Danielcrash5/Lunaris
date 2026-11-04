@@ -21,6 +21,7 @@ add_subdirectory(thirdparty/luau EXCLUDE_FROM_ALL)
 
 add_library(lunaris
     src/State.cpp
+    src/Table.cpp
 )
 add_library(Lunaris::Lunaris ALIAS lunaris)
 

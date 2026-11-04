@@ -2,8 +2,8 @@
 
 #include <lua.h>
 
-#include <limits>
 #include <cstdlib>
+#include <limits>
 #include <new>
 #include <utility>
 
@@ -46,8 +46,7 @@ void *State::tracked_allocate(void *userData, void *pointer,
         return nullptr;
     }
 
-    const std::size_t retainedBytes =
-        context.allocatedBytes - previousSize;
+    const std::size_t retainedBytes = context.allocatedBytes - previousSize;
     if (newSize > std::numeric_limits<std::size_t>::max() - retainedBytes) {
         return nullptr;
     }
@@ -69,9 +68,10 @@ void *State::tracked_allocate(void *userData, void *pointer,
 
 State::State(const StateConfig &config) {
     m_allocatorContext = std::make_unique<AllocatorContext>();
+    m_lifetime = std::make_shared<detail::StateLifetime>();
     m_allocatorContext->allocate = config.allocator.allocate != nullptr
-                                      ? config.allocator.allocate
-                                      : &default_allocate;
+                                       ? config.allocator.allocate
+                                       : &default_allocate;
     m_allocatorContext->userData = config.allocator.userData;
     m_allocatorContext->memoryLimit = config.memoryLimit;
 
@@ -79,26 +79,31 @@ State::State(const StateConfig &config) {
     if (m_state == nullptr) {
         throw std::bad_alloc{};
     }
+    m_lifetime->state = m_state;
 }
 
 State::~State() {
     if (m_state != nullptr) {
+        m_lifetime->state = nullptr;
         lua_close(m_state);
     }
 }
 
 State::State(State &&other) noexcept
     : m_state(std::exchange(other.m_state, nullptr)),
-      m_allocatorContext(std::move(other.m_allocatorContext)) {
+      m_allocatorContext(std::move(other.m_allocatorContext)),
+      m_lifetime(std::move(other.m_lifetime)) {
 }
 
 State &State::operator=(State &&other) noexcept {
     if (this != &other) {
         if (m_state != nullptr) {
+            m_lifetime->state = nullptr;
             lua_close(m_state);
         }
 
         m_allocatorContext = std::move(other.m_allocatorContext);
+        m_lifetime = std::move(other.m_lifetime);
         m_state = std::exchange(other.m_state, nullptr);
     }
 
@@ -168,6 +173,25 @@ void State::push(const Value &value) {
             }
         },
         value);
+}
+
+Table State::create_table() {
+    lua_State *state = checked_state();
+    lua_createtable(state, 0, 0);
+    const int reference = lua_ref(state, -1);
+    lua_pop(state, 1);
+    return Table(m_lifetime, reference);
+}
+
+Table State::get_table(int index) {
+    validate_index(index);
+    lua_State *state = checked_state();
+    if (lua_type(state, index) != LUA_TTABLE) {
+        throw std::invalid_argument("Luau value is not a table");
+    }
+
+    const int reference = lua_ref(state, index);
+    return Table(m_lifetime, reference);
 }
 
 void State::validate_index(int index) const {

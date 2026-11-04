@@ -333,6 +333,14 @@ and invalid indices instead of silently coercing them. A `double` read accepts
 both Luau integer and number values; integer reads require an integer value
 that fits the requested C++ type.
 
+`Table` is a move-only registry-backed handle, so the referenced table remains
+alive even after it is removed from the stack or garbage collection runs.
+The handle may outlive its `State`, but operations after State destruction
+fail explicitly and releasing the handle remains safe. The initial API reads and writes string-keyed
+scalar fields using raw table access, so it does not invoke `__index` or
+`__newindex`. Setting a field to nil removes it. Nested table and other
+reference values will use dedicated handles in later API work.
+
 ---
 
 # 10. Globals
@@ -1849,6 +1857,7 @@ tests/
 ├── CMakeLists.txt
 ├── Unit/
 │   ├── StateTests.cpp
+│   ├── TableTests.cpp
 │   ├── ValueStackTests.cpp
 │   ├── TableTests.cpp
 │   ├── FunctionTests.cpp
