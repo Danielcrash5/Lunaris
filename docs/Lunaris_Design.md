@@ -361,11 +361,17 @@ lua_pop(L, 1);
 Lunaris:
 
 ```cpp
-lua["EngineName"] = "Axiom";
+lua.set_global("EngineName", "Axiom");
 
-std::string name =
-    lua["EngineName"].get<std::string>();
+auto name = lua.get_global("EngineName");
 ```
+
+The initial global API reads and writes scalar `Value`s and restores the
+previous stack height on both success and failure. Missing globals read as
+`nil`; setting a global to `nil` removes it. Reference-valued globals require
+dedicated handles and are reported as type errors rather than discarded.
+Names with embedded null bytes are rejected because the underlying Luau global
+API accepts null-terminated names.
 
 ---
 
@@ -1851,6 +1857,7 @@ tests/
 │   ├── StateTests.cpp
 │   ├── TableTests.cpp
 │   ├── ValueStackTests.cpp
+│   ├── GlobalTests.cpp
 │   ├── FunctionTests.cpp
 │   ├── BindingTests.cpp
 │   ├── UserdataTests.cpp
@@ -1887,7 +1894,7 @@ tests/
 | Area | Required cases |
 |---|---|
 | State and lifetime | creation, destruction, move semantics if supported, configuration, repeated create/destroy |
-| Values and stack | supported conversions, invalid conversions, stack indices, stack balance after success and failure |
+| Values, stack, and globals | supported conversions, invalid conversions, stack indices, global get/set, missing and reference-valued globals, embedded-null names, stack balance after success and failure |
 | Tables and functions | get/set, missing keys, argument/return conversion, protected calls, error propagation |
 | Bindings | free functions, lambdas, member methods, const methods, properties, read-only properties, constructors, overload resolution |
 | Userdata | type checks, ownership, destruction, Local/Transferable/Shared policy enforcement |

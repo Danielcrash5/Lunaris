@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lunaris/Result.h"
 #include "lunaris/StateConfig.h"
 #include "lunaris/Table.h"
 #include "lunaris/Value.h"
@@ -89,6 +90,17 @@ class State {
     /// @throws std::out_of_range if index is invalid.
     /// @throws std::invalid_argument if the value is not a table.
     [[nodiscard]] Table get_table(int index);
+
+    /// Reads a scalar global; a missing global is returned as nil.
+    /// @return The scalar value, or a Type error if the global is a reference
+    /// value or the name contains an embedded null byte.
+    [[nodiscard]] Result<Value> get_global(std::string_view name) const;
+
+    /// Sets a scalar global. Setting nil removes the global.
+    /// @return Success, or a Type error if the name contains an embedded null
+    /// byte.
+    [[nodiscard]] Result<void> set_global(std::string_view name,
+                                          const Value &value);
 
     /// Pushes an integer onto the Luau stack.
     template <std::integral T>

@@ -18,6 +18,21 @@ struct State::AllocatorContext {
 
 namespace {
 
+class StackRestore {
+  public:
+    explicit StackRestore(lua_State *state)
+        : m_state(state), m_top(lua_gettop(state)) {
+    }
+
+    ~StackRestore() {
+        lua_settop(m_state, m_top);
+    }
+
+  private:
+    lua_State *m_state;
+    int m_top;
+};
+
 void *default_allocate(void *, void *pointer, std::size_t,
                        std::size_t newSize) {
     if (newSize == 0) {
@@ -192,6 +207,40 @@ Table State::get_table(int index) {
 
     const int reference = lua_ref(state, index);
     return Table(m_lifetime, reference);
+}
+
+Result<Value> State::get_global(std::string_view name) const {
+    if (name.find('\0') != std::string_view::npos) {
+        return Result<Value>::failure(Error(
+            ErrorType::Type, "global name contains an embedded null byte"));
+    }
+
+    lua_State *state = checked_state();
+    StackRestore restore(state);
+    const std::string globalName(name);
+    lua_getglobal(state, globalName.c_str());
+
+    const int type = lua_type(state, -1);
+    if (type != LUA_TNIL && type != LUA_TBOOLEAN && type != LUA_TINTEGER &&
+        type != LUA_TNUMBER && type != LUA_TSTRING) {
+        return Result<Value>::failure(
+            Error(ErrorType::Type, "global value is not a scalar"));
+    }
+
+    return Result<Value>::success(get_value(-1));
+}
+
+Result<void> State::set_global(std::string_view name, const Value &value) {
+    if (name.find('\0') != std::string_view::npos) {
+        return Result<void>::failure(Error(
+            ErrorType::Type, "global name contains an embedded null byte"));
+    }
+
+    lua_State *state = checked_state();
+    const std::string globalName(name);
+    push(value);
+    lua_setglobal(state, globalName.c_str());
+    return Result<void>::success();
 }
 
 void State::validate_index(int index) const {
