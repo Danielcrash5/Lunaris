@@ -1783,7 +1783,7 @@ The handle is a destination; it does not dispatch automatically. A handler
 registered through the C++ `Actor::bind()` API runs only when the host calls
 dispatch on the Actor's designated context.
 
-Luau can also bind one callback per topic with
+Luau can also bind one notification callback per topic with
 `target:BindToMessage(topic, callback)`. The callback receives the scalar
 payload and runs only during host-driven dispatch. Dispatch must occur on the
 owning State's execution context; a Luau State must never be accessed
@@ -1798,18 +1798,23 @@ actor:SendMessage(
 )
 ```
 
-Request/response can be built on top:
+Requests use a separate handler binding so notifications keep their existing
+fire-and-forget behavior. C++ handlers are registered with
+`Actor::bind_request()` and return `Result<Value>`. Luau handlers are bound
+with `BindToRequest`; their scalar return value resolves the request Future:
 
 ```lua
-local future =
-    actor:Request(
-        "Calculate",
-        data
-    )
+target:BindToRequest("Calculate", function(data)
+    return calculate(data)
+end)
 
-local result =
-    future:await()
+local result = target:Request("Calculate", data):await()
 ```
+
+The host still drives dispatch on the Actor's designated context. Handler
+errors fail both the dispatch operation and the request Future; a request for a
+closed Actor returns an already-failed Future. Cancelling a request Future does
+not interrupt a message already queued or its handler.
 
 Arbitrary cross-State closure calls are not the primary communication mechanism.
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lunaris/Future.h"
 #include "lunaris/MessageQueue.h"
 #include "lunaris/Result.h"
 
@@ -10,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <variant>
 
 namespace lunaris {
 
@@ -21,6 +23,7 @@ class State;
 class Actor {
   public:
     using Handler = std::function<Result<void>(const Message &)>;
+    using RequestHandler = std::function<Result<Value>(const Message &)>;
 
     Actor() = default;
     Actor(const Actor &) = delete;
@@ -35,11 +38,19 @@ class Actor {
     /// Adds a handler for a topic. Duplicate topic bindings are rejected.
     void bind(std::string_view topic, Handler handler);
 
+    /// Adds a request handler for a topic. Its result completes each request.
+    /// Duplicate topic bindings are rejected.
+    void bind_request(std::string_view topic, RequestHandler handler);
+
     /// Removes the handler for a topic.
     [[nodiscard]] bool unbind(std::string_view topic);
 
     /// Enqueues a message for later dispatch.
     [[nodiscard]] bool send(std::string_view topic, Value payload);
+
+    /// Enqueues a request whose Future is completed by a request handler.
+    /// A closed Actor returns an already-failed Future.
+    [[nodiscard]] Future<Value> request(std::string_view topic, Value payload);
 
     /// Dispatches at most one queued message. Returns false if the queue is
     /// empty. Handler errors are returned after consuming that message.
@@ -63,7 +74,8 @@ class Actor {
     MessageQueue m_messages;
     std::mutex m_dispatchMutex;
     std::mutex m_handlersMutex;
-    std::unordered_map<std::string, Handler> m_handlers;
+    std::unordered_map<std::string, std::variant<Handler, RequestHandler>>
+        m_handlers;
 };
 
 } // namespace lunaris

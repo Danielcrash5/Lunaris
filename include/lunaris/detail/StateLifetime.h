@@ -1,7 +1,9 @@
 #pragma once
 
 #include "lunaris/Bytecode.h"
+#include "lunaris/Future.h"
 #include "lunaris/Result.h"
+#include "lunaris/Value.h"
 
 #include <atomic>
 #include <functional>
@@ -55,6 +57,9 @@ struct StateLifetime {
 void install_module_loader(lua_State *state,
                            const std::shared_ptr<StateLifetime> &lifetime,
                            std::shared_ptr<ModuleLoader> moduleLoader);
+void push_future_userdata(lua_State *state,
+                          const std::weak_ptr<StateLifetime> &lifetime,
+                          Future<Value> future);
 void register_library_module(lua_State *state,
                              const std::shared_ptr<StateLifetime> &lifetime,
                              std::string_view moduleName, int libraryReference,

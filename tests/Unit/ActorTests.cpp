@@ -79,6 +79,64 @@ TEST(ActorTests, ReportsMissingHandlerAndConsumesThatMessage) {
     EXPECT_EQ(actor.pending(), 0U);
 }
 
+TEST(ActorTests, RequestFutureReceivesHandlerResult) {
+    lunaris::Actor actor;
+    actor.bind_request("Calculate", [](const lunaris::Message &message) {
+        return lunaris::Result<lunaris::Value>::success(
+            lunaris::Value{std::get<std::int64_t>(message.payload) * 2});
+    });
+
+    auto response = actor.request("Calculate", std::int64_t{21});
+    EXPECT_EQ(response.status(), lunaris::FutureStatus::Pending);
+    auto dispatched = actor.dispatch_one();
+    ASSERT_TRUE(dispatched);
+    EXPECT_TRUE(dispatched.value());
+
+    auto result = response.get();
+    ASSERT_TRUE(result);
+    EXPECT_EQ(std::get<std::int64_t>(result.value()), 42);
+}
+
+TEST(ActorTests, RequestErrorsCompleteFutureAndReportDispatchFailure) {
+    lunaris::Actor actor;
+    actor.bind_request("Fail", [](const lunaris::Message &) {
+        return lunaris::Result<lunaris::Value>::failure(
+            lunaris::Error(lunaris::ErrorType::Runtime, "request failed"));
+    });
+
+    auto response = actor.request("Fail", lunaris::Value{});
+    auto dispatched = actor.dispatch_one();
+    ASSERT_FALSE(dispatched);
+    EXPECT_EQ(dispatched.error().message(), "request failed");
+
+    auto result = response.get();
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().message(), "request failed");
+}
+
+TEST(ActorTests, MissingRequestHandlerFailsFuture) {
+    lunaris::Actor actor;
+    auto response = actor.request("Missing", lunaris::Value{});
+
+    auto dispatched = actor.dispatch_one();
+    ASSERT_FALSE(dispatched);
+    auto result = response.get();
+    ASSERT_FALSE(result);
+    EXPECT_NE(result.error().message().find("Missing"), std::string_view::npos);
+}
+
+TEST(ActorTests, RequestOnClosedActorReturnsFailedFuture) {
+    lunaris::Actor actor;
+    actor.close();
+
+    auto response = actor.request("Calculate", lunaris::Value{});
+    EXPECT_EQ(response.status(), lunaris::FutureStatus::Failed);
+    auto result = response.get();
+    ASSERT_FALSE(result);
+    EXPECT_NE(result.error().message().find("closed Actor"),
+              std::string_view::npos);
+}
+
 TEST(ActorTests, RejectsInvalidAndDuplicateBindings) {
     lunaris::Actor actor;
     auto handler = [](const lunaris::Message &) {
@@ -280,6 +338,54 @@ TEST(ActorTests, LuauBindToMessageRunsCallbackDuringHostDispatch) {
     auto received = script.value().get_global("received");
     ASSERT_TRUE(received);
     EXPECT_EQ(std::get<std::string>(received.value()), "ready");
+}
+
+TEST(ActorTests, LuauRequestFutureResumesAwaitingCoroutine) {
+    auto actor = std::make_shared<lunaris::Actor>();
+    lunaris::State state;
+    lunaris::Actor::install(state, "target", actor);
+    state.open_coroutine_library();
+
+    auto script = state.load_script(
+        "target:BindToRequest('Double', function(value) return value * 2 end); "
+        "local thread = coroutine.create(function() "
+        "local future = target:Request('Double', 21); "
+        "response = future:await() end); "
+        "return coroutine.resume(thread)",
+        "actor-request-await.luau");
+    ASSERT_TRUE(script);
+    auto started = script.value().execute();
+    ASSERT_TRUE(started) << started.error().message();
+    ASSERT_EQ(started.value().size(), 1U);
+    EXPECT_TRUE(std::get<bool>(started.value()[0]));
+
+    auto dispatched = actor->dispatch_pending();
+    ASSERT_TRUE(dispatched) << dispatched.error().message();
+    EXPECT_EQ(dispatched.value(), 1U);
+
+    auto resumed = state.resume_ready();
+    ASSERT_TRUE(resumed) << resumed.error().message();
+    EXPECT_EQ(resumed.value(), 1U);
+    auto response = script.value().get_global("response");
+    ASSERT_TRUE(response);
+    EXPECT_EQ(std::get<double>(response.value()), 42.0);
+}
+
+TEST(ActorTests, LuauRequestHandlerErrorsFailFutureAndDispatch) {
+    auto actor = std::make_shared<lunaris::Actor>();
+    lunaris::State state;
+    lunaris::Actor::install(state, "target", actor);
+
+    auto script = state.load_script(
+        "target:BindToRequest('Bad', function() return {} end); "
+        "target:Request('Bad', nil)",
+        "actor-request-invalid-response.luau");
+    ASSERT_TRUE(script);
+    ASSERT_TRUE(script.value().execute());
+
+    auto dispatched = actor->dispatch_one();
+    ASSERT_FALSE(dispatched);
+    EXPECT_EQ(dispatched.error().type(), lunaris::ErrorType::Type);
 }
 
 TEST(ActorTests, LuauHandlerErrorsAreReturnedFromDispatch) {

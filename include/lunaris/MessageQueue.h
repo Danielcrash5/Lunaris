@@ -1,11 +1,13 @@
 #pragma once
 
+#include "lunaris/Future.h"
 #include "lunaris/Value.h"
 
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -19,6 +21,7 @@ namespace lunaris {
 struct Message {
     std::string topic;
     Value payload;
+    std::shared_ptr<Promise<Value>> response;
 };
 
 /// Thread-safe, unbounded FIFO mailbox. It does not schedule handlers.
@@ -30,7 +33,9 @@ class MessageQueue {
 
     /// Enqueues a message, or returns false if the queue is closed.
     /// Topics must be non-empty and contain no embedded null bytes.
-    [[nodiscard]] bool send(std::string_view topic, Value payload) {
+    [[nodiscard]] bool
+    send(std::string_view topic, Value payload,
+         std::shared_ptr<Promise<Value>> response = nullptr) {
         if (topic.empty() || topic.find('\0') != std::string_view::npos) {
             throw std::invalid_argument(
                 "message topic must be non-empty and contain no null byte");
@@ -41,8 +46,8 @@ class MessageQueue {
             if (m_closed) {
                 return false;
             }
-            m_messages.push_back(
-                Message{std::string(topic), std::move(payload)});
+            m_messages.push_back(Message{std::string(topic), std::move(payload),
+                                         std::move(response)});
         }
         m_condition.notify_one();
         return true;

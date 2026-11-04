@@ -3,6 +3,7 @@
 #include "lunaris/Binding.h"
 #include "lunaris/Error.h"
 #include "lunaris/State.h"
+#include "lunaris/detail/StateLifetime.h"
 
 #include <lua.h>
 #include <lualib.h>
@@ -197,6 +198,79 @@ int actor_bind_message(lua_State *state) {
     });
 }
 
+int actor_bind_request(lua_State *state) {
+    return detail::invoke_protected(state, [state] {
+        if (lua_gettop(state) != 3) {
+            throw std::invalid_argument(
+                "Actor:BindToRequest expects a topic and function");
+        }
+        auto *userdata = get_actor_userdata(state, 1);
+        if (lua_type(state, 2) != LUA_TSTRING) {
+            throw std::invalid_argument("actor request topic must be a string");
+        }
+        if (lua_type(state, 3) != LUA_TFUNCTION) {
+            throw std::invalid_argument(
+                "actor request handler must be a function");
+        }
+        const auto lifetime = userdata->lifetime.lock();
+        if (!lifetime || lifetime->state != state) {
+            throw std::logic_error(
+                "Actor handle is not bound to this Luau State");
+        }
+
+        std::size_t length = 0;
+        const char *topic = lua_tolstring(state, 2, &length);
+        auto callback = std::make_shared<ActorLuaCallback>();
+        callback->lifetime = lifetime;
+        callback->reference = lua_ref(state, 3);
+
+        const std::string ownedTopic(topic, length);
+        try {
+            userdata->actor->bind_request(
+                ownedTopic,
+                [callback](const Message &message) -> Result<Value> {
+                    const auto callbackLifetime = callback->lifetime.lock();
+                    if (!callbackLifetime ||
+                        callbackLifetime->state == nullptr) {
+                        return Result<Value>::failure(
+                            Error(ErrorType::Runtime,
+                                  "Actor request handler State is no longer "
+                                  "available"));
+                    }
+                    lua_State *callbackState = callbackLifetime->state;
+                    StackRestore restore(callbackState);
+                    lua_getref(callbackState, callback->reference);
+                    if (lua_type(callbackState, -1) != LUA_TFUNCTION) {
+                        return Result<Value>::failure(Error(
+                            ErrorType::Runtime,
+                            "Actor request handler reference is no longer "
+                            "valid"));
+                    }
+                    push_message_value(callbackState, message.payload);
+                    const int status = lua_pcall(callbackState, 1, 1, 0);
+                    if (status != LUA_OK) {
+                        const ErrorType type = status == LUA_ERRMEM
+                                                   ? ErrorType::Memory
+                                                   : ErrorType::Runtime;
+                        return Result<Value>::failure(
+                            Error(type, read_luau_error(callbackState)));
+                    }
+                    try {
+                        return Result<Value>::success(
+                            read_message_value(callbackState, -1));
+                    } catch (const std::exception &exception) {
+                        return Result<Value>::failure(
+                            Error(ErrorType::Type, exception.what()));
+                    }
+                });
+        } catch (...) {
+            lua_unref(state, callback->reference);
+            throw;
+        }
+        return 0;
+    });
+}
+
 int actor_send_message(lua_State *state) {
     return detail::invoke_protected(state, [state] {
         if (lua_gettop(state) != 3) {
@@ -216,6 +290,27 @@ int actor_send_message(lua_State *state) {
     });
 }
 
+int actor_request(lua_State *state) {
+    return detail::invoke_protected(state, [state] {
+        if (lua_gettop(state) != 3) {
+            throw std::invalid_argument(
+                "Actor:Request expects a topic and scalar payload");
+        }
+        auto *userdata = get_actor_userdata(state, 1);
+        if (lua_type(state, 2) != LUA_TSTRING) {
+            throw std::invalid_argument("actor request topic must be a string");
+        }
+        std::size_t length = 0;
+        const char *topic = lua_tolstring(state, 2, &length);
+        const Value payload = read_message_value(state, 3);
+        auto future =
+            userdata->actor->request(std::string_view(topic, length), payload);
+        detail::push_future_userdata(state, userdata->lifetime,
+                                     std::move(future));
+        return 1;
+    });
+}
+
 int actor_index(lua_State *state) {
     return detail::invoke_protected(state, [state] {
         (void)get_actor_userdata(state, 1);
@@ -228,8 +323,13 @@ int actor_index(lua_State *state) {
         const std::string_view method(key, length);
         if (method == "SendMessage") {
             lua_pushcclosure(state, actor_send_message, "Actor.SendMessage", 0);
+        } else if (method == "Request") {
+            lua_pushcclosure(state, actor_request, "Actor.Request", 0);
         } else if (method == "BindToMessage") {
             lua_pushcclosure(state, actor_bind_message, "Actor.BindToMessage",
+                             0);
+        } else if (method == "BindToRequest") {
+            lua_pushcclosure(state, actor_bind_request, "Actor.BindToRequest",
                              0);
         } else {
             lua_pushnil(state);
@@ -275,8 +375,25 @@ void Actor::bind(std::string_view topic, Handler handler) {
         throw std::invalid_argument("actor handler cannot be empty");
     }
     std::lock_guard lock(m_handlersMutex);
-    const auto [iterator, inserted] =
-        m_handlers.emplace(std::string(topic), std::move(handler));
+    const auto [iterator, inserted] = m_handlers.emplace(
+        std::string(topic),
+        std::variant<Handler, RequestHandler>{std::in_place_type<Handler>,
+                                              std::move(handler)});
+    if (!inserted) {
+        throw std::invalid_argument("actor topic already has a handler");
+    }
+}
+
+void Actor::bind_request(std::string_view topic, RequestHandler handler) {
+    validate_topic(topic);
+    if (!handler) {
+        throw std::invalid_argument("actor request handler cannot be empty");
+    }
+    std::lock_guard lock(m_handlersMutex);
+    const auto [iterator, inserted] = m_handlers.emplace(
+        std::string(topic),
+        std::variant<Handler, RequestHandler>{
+            std::in_place_type<RequestHandler>, std::move(handler)});
     if (!inserted) {
         throw std::invalid_argument("actor topic already has a handler");
     }
@@ -292,37 +409,80 @@ bool Actor::send(std::string_view topic, Value payload) {
     return m_messages.send(topic, std::move(payload));
 }
 
+Future<Value> Actor::request(std::string_view topic, Value payload) {
+    validate_topic(topic);
+    auto response = std::make_shared<Promise<Value>>();
+    auto future = response->get_future();
+    if (!m_messages.send(topic, std::move(payload), response)) {
+        (void)response->set_error(
+            Error(ErrorType::Runtime, "cannot request from a closed Actor"));
+    }
+    return future;
+}
+
 Result<bool> Actor::dispatch_one_locked() {
     auto message = m_messages.try_receive();
     if (!message) {
         return Result<bool>::success(false);
     }
 
-    Handler handler;
+    std::variant<Handler, RequestHandler> handler;
     {
         std::lock_guard lock(m_handlersMutex);
         const auto iterator = m_handlers.find(message->topic);
         if (iterator == m_handlers.end()) {
-            return Result<bool>::failure(
-                Error(ErrorType::Runtime, "actor has no handler for topic '" +
-                                              message->topic + "'"));
+            const Error error(ErrorType::Runtime,
+                              "actor has no handler for topic '" +
+                                  message->topic + "'");
+            if (message->response) {
+                (void)message->response->set_error(error);
+            }
+            return Result<bool>::failure(error);
         }
         handler = iterator->second;
     }
 
+    const bool isRequest = message->response != nullptr;
+    if (isRequest != std::holds_alternative<RequestHandler>(handler)) {
+        const Error error(ErrorType::Runtime,
+                          isRequest
+                              ? "actor topic is not bound as a request handler"
+                              : "actor topic requires a request");
+        if (message->response) {
+            (void)message->response->set_error(error);
+        }
+        return Result<bool>::failure(error);
+    }
+
     try {
-        auto result = handler(*message);
-        if (!result) {
-            return Result<bool>::failure(result.error());
+        if (isRequest) {
+            auto result = std::get<RequestHandler>(handler)(*message);
+            if (!result) {
+                (void)message->response->set_error(result.error());
+                return Result<bool>::failure(result.error());
+            }
+            (void)message->response->set_value(std::move(result).value());
+        } else {
+            auto result = std::get<Handler>(handler)(*message);
+            if (!result) {
+                return Result<bool>::failure(result.error());
+            }
         }
     } catch (const std::exception &exception) {
-        return Result<bool>::failure(
-            Error(ErrorType::Runtime, "actor handler threw an exception: " +
-                                          std::string(exception.what())));
+        const Error error(ErrorType::Runtime,
+                          "actor handler threw an exception: " +
+                              std::string(exception.what()));
+        if (message->response) {
+            (void)message->response->set_error(error);
+        }
+        return Result<bool>::failure(error);
     } catch (...) {
-        return Result<bool>::failure(
-            Error(ErrorType::Runtime,
-                  "actor handler threw a non-standard exception"));
+        const Error error(ErrorType::Runtime,
+                          "actor handler threw a non-standard exception");
+        if (message->response) {
+            (void)message->response->set_error(error);
+        }
+        return Result<bool>::failure(error);
     }
     return Result<bool>::success(true);
 }

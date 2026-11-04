@@ -271,6 +271,28 @@ void install_future_metatable(lua_State *state) {
 
 } // namespace
 
+void detail::push_future_userdata(
+    lua_State *state, const std::weak_ptr<detail::StateLifetime> &lifetime,
+    Future<Value> future) {
+    if (!future.valid()) {
+        throw std::invalid_argument("cannot push an invalid Future");
+    }
+
+    install_future_metatable(state);
+    auto *userdata = static_cast<FutureUserdata *>(lua_newuserdatadtor(
+        state, sizeof(FutureUserdata), destroy_future_userdata));
+    if (userdata == nullptr) {
+        throw std::bad_alloc{};
+    }
+    new (userdata) FutureUserdata{
+        std::make_shared<Future<Value>>(std::move(future)), lifetime};
+    lua_getfield(state, LUA_REGISTRYINDEX, kFutureMetatable);
+    if (lua_type(state, -1) != LUA_TTABLE) {
+        throw std::runtime_error("Future metatable is not installed");
+    }
+    lua_setmetatable(state, -2);
+}
+
 void State::set_future_global(std::string_view name, Future<Value> future) {
     if (name.empty() || name.find('\0') != std::string_view::npos) {
         throw std::invalid_argument(
@@ -291,19 +313,7 @@ void State::set_future_global(std::string_view name, Future<Value> future) {
                                     "' is already registered");
     }
 
-    install_future_metatable(lua);
-    auto *userdata = static_cast<FutureUserdata *>(lua_newuserdatadtor(
-        lua, sizeof(FutureUserdata), destroy_future_userdata));
-    if (userdata == nullptr) {
-        throw std::bad_alloc{};
-    }
-    new (userdata) FutureUserdata{
-        std::make_shared<Future<Value>>(std::move(future)), m_lifetime};
-    lua_getfield(lua, LUA_REGISTRYINDEX, kFutureMetatable);
-    if (lua_type(lua, -1) != LUA_TTABLE) {
-        throw std::runtime_error("Future metatable is not installed");
-    }
-    lua_setmetatable(lua, -2);
+    detail::push_future_userdata(lua, m_lifetime, std::move(future));
     lua_setglobal(lua, globalName.c_str());
 }
 
