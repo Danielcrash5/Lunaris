@@ -504,7 +504,7 @@ print(player.Health)
 The wrapper manages userdata, metatables, type checks and dispatch.
 
 The initial `State::new_usertype<T>` implementation supports State-local,
-Luau-owned objects created by one `constructor<T, Args...>()` descriptor,
+Luau-owned objects created by `constructor<T, Args...>()` descriptors,
 mutable or read-only data-member properties, and non-overloaded member
 functions. Constructor and member arguments/results support booleans, numeric
 scalars, `std::string`, and callback-scoped `std::string_view`. Invalid types,
@@ -520,9 +520,15 @@ property("Health", &Player::GetHealth, &Player::SetHealth)
 property("Name", &Player::GetName)
 ```
 
-Borrowed/shared userdata, actor transfers, overloaded methods and constructors,
-enums, flags, and library registration are not part of this first binding
-slice.
+Constructor overloads are grouped with `constructors(...)`, and member
+function overloads with `method("Name", overload(...))`. Overloaded member
+function pointers must be disambiguated with `static_cast`. Dispatch requires
+exactly one matching candidate; no match or an ambiguous match is reported as
+a runtime error. Integer and floating-point arguments both accept Luau
+numbers, so overlapping numeric overloads can be ambiguous.
+
+Borrowed/shared userdata, actor transfers, enums, flags, and library
+registration are not part of this first binding slice.
 
 ---
 
@@ -2228,10 +2234,9 @@ boundary, successful calls, and error paths.
 - Add constructors, overloads, enums, and flags.
 - Add the library registration system.
 
-The first local-userdata slice is implemented: owned usertypes, one
-constructor signature, data-member and getter/setter properties, and
-non-overloaded methods. Borrowed/shared ownership, overloads, enums/flags, and
-library registration remain open.
+The first local-userdata slice is implemented: owned usertypes, constructor
+and method overload dispatch, data-member and getter/setter properties.
+Borrowed/shared ownership, enums/flags, and library registration remain open.
 
 **Exit criteria:** lifetime, invalid-type, ownership, and repeated-registration
 behavior is documented and tested.

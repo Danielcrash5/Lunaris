@@ -25,11 +25,29 @@ namespace lunaris {
 
 /// Describes one C++ constructor signature for a usertype.
 template <typename T, typename... Args> struct ConstructorDescriptor {};
+template <typename Descriptor> struct ConstructorClass;
+template <typename T, typename... Args>
+struct ConstructorClass<ConstructorDescriptor<T, Args...>> {
+    using Type = T;
+};
 
 /// Creates a descriptor for the single constructor exposed as Type.new(...).
 template <typename T, typename... Args>
 [[nodiscard]] constexpr ConstructorDescriptor<T, Args...> constructor() {
     return {};
+}
+
+template <typename... Descriptors> struct ConstructorsDescriptor {
+    std::tuple<Descriptors...> constructors;
+};
+
+/// Combines constructor descriptors into Type.new(...) overloads.
+template <typename... Descriptors>
+[[nodiscard]] constexpr auto constructors(Descriptors... descriptors) {
+    static_assert(sizeof...(Descriptors) > 0,
+                  "at least one constructor is required");
+    return ConstructorsDescriptor<Descriptors...>{
+        std::tuple<Descriptors...>{descriptors...}};
 }
 
 /// Describes a public data-member property on a usertype.
@@ -66,6 +84,16 @@ template <typename Class, typename Method> struct MethodDescriptor {
     Method method;
 };
 
+template <typename... Methods> struct MethodOverloadDescriptor {
+    std::tuple<Methods...> methods;
+};
+
+template <typename Class, typename... Methods>
+struct MethodOverloadRegistration {
+    std::string name;
+    std::tuple<Methods...> methods;
+};
+
 namespace detail {
 
 template <typename Method> struct MemberFunctionClass;
@@ -87,6 +115,14 @@ struct MemberFunctionClass<Return (Class::*)(Args...) const noexcept> {
 };
 
 } // namespace detail
+
+/// Combines member-function pointers into one overload set.
+template <typename... Methods>
+    requires(sizeof...(Methods) > 1)
+[[nodiscard]] constexpr auto overload(Methods... methods) {
+    return MethodOverloadDescriptor<Methods...>{
+        std::tuple<Methods...>{methods...}};
+}
 
 /// Creates a read-only property backed by a no-argument member getter.
 template <typename Getter>
@@ -119,7 +155,60 @@ template <typename Method>
     return MethodDescriptor<Class, Method>{std::string(name), methodPointer};
 }
 
+template <typename... Methods>
+[[nodiscard]] auto method(std::string_view name,
+                          MethodOverloadDescriptor<Methods...> descriptor) {
+    using Class = typename detail::MemberFunctionClass<
+        std::tuple_element_t<0, std::tuple<Methods...>>>::Type;
+    static_assert(
+        (std::same_as<Class,
+                      typename detail::MemberFunctionClass<Methods>::Type> &&
+         ...),
+        "overloaded methods must belong to the same usertype");
+    return MethodOverloadRegistration<Class, Methods...>{
+        std::string(name), std::move(descriptor.methods)};
+}
+
 namespace detail {
+
+template <typename T>
+[[nodiscard]] bool argument_matches(lua_State *state, int index) {
+    using U = std::remove_cvref_t<T>;
+    if constexpr (std::same_as<U, bool>) {
+        return lua_type(state, index) == LUA_TBOOLEAN;
+    } else if constexpr (std::integral<U>) {
+        std::int64_t value = 0;
+        if (lua_type(state, index) == LUA_TINTEGER) {
+            int isInteger = 0;
+            value = lua_tointeger64(state, index, &isInteger);
+            return isInteger != 0 && std::in_range<U>(value);
+        }
+        if (lua_type(state, index) != LUA_TNUMBER) {
+            return false;
+        }
+        const double number = lua_tonumber(state, index);
+        return std::isfinite(number) && std::trunc(number) == number &&
+               number >= -9223372036854775808.0 &&
+               number < 9223372036854775808.0 &&
+               std::in_range<U>(static_cast<std::int64_t>(number));
+    } else if constexpr (std::floating_point<U>) {
+        return lua_type(state, index) == LUA_TNUMBER ||
+               lua_type(state, index) == LUA_TINTEGER;
+    } else if constexpr (std::same_as<U, std::string> ||
+                         std::same_as<U, std::string_view>) {
+        return lua_type(state, index) == LUA_TSTRING;
+    } else {
+        return false;
+    }
+}
+
+template <typename... Args, std::size_t... Indices>
+[[nodiscard]] bool arguments_match(lua_State *state, int firstArgument,
+                                   std::index_sequence<Indices...>) {
+    return (argument_matches<Args>(state,
+                                   firstArgument + static_cast<int>(Indices)) &&
+            ...);
+}
 
 class UserdataMember {
   public:
@@ -128,6 +217,9 @@ class UserdataMember {
     virtual ~UserdataMember() = default;
     [[nodiscard]] virtual std::string_view name() const noexcept = 0;
     [[nodiscard]] virtual Kind kind() const noexcept = 0;
+    [[nodiscard]] virtual bool matches(lua_State *) const {
+        return false;
+    }
     virtual int get(lua_State *state) = 0;
     virtual int set(lua_State *state) = 0;
     virtual int call(lua_State *state) = 0;
@@ -136,6 +228,7 @@ class UserdataMember {
 class UserdataConstructor {
   public:
     virtual ~UserdataConstructor() = default;
+    [[nodiscard]] virtual bool matches(lua_State *state) const = 0;
     virtual int create(lua_State *state, std::string_view metatableName) = 0;
 };
 
@@ -415,6 +508,12 @@ class DefaultUserdataConstructor final : public UserdataConstructor {
     static_assert(alignof(T) <= alignof(std::max_align_t),
                   "over-aligned C++ usertypes are not supported");
 
+    [[nodiscard]] bool matches(lua_State *state) const override {
+        return lua_gettop(state) == static_cast<int>(sizeof...(Args)) &&
+               arguments_match<Args...>(state, 1,
+                                        std::index_sequence_for<Args...>{});
+    }
+
     int create(lua_State *state, std::string_view metatableName) override {
         if (lua_gettop(state) != static_cast<int>(sizeof...(Args))) {
             throw std::invalid_argument("constructor received the wrong number "
@@ -445,6 +544,79 @@ class DefaultUserdataConstructor final : public UserdataConstructor {
             },
             std::move(arguments));
     }
+};
+
+template <typename T, typename Descriptor> struct ConstructorImplementation;
+
+template <typename T, typename ConstructorType, typename... Args>
+struct ConstructorImplementation<
+    T, ConstructorDescriptor<ConstructorType, Args...>> {
+    static_assert(std::same_as<T, ConstructorType>,
+                  "constructor belongs to a different usertype");
+    using Type = DefaultUserdataConstructor<T, Args...>;
+};
+
+template <typename T, typename... Descriptors>
+class OverloadedUserdataConstructor final : public UserdataConstructor {
+  public:
+    [[nodiscard]] bool matches(lua_State *state) const override {
+        return matching_index(state).second == 1;
+    }
+
+    int create(lua_State *state, std::string_view metatableName) override {
+        const auto [selected, count] = matching_index(state);
+        if (count == 0) {
+            throw std::invalid_argument(
+                "no constructor overload matches the supplied arguments");
+        }
+        if (count > 1) {
+            throw std::invalid_argument(
+                "constructor call is ambiguous for the supplied arguments");
+        }
+        return create_selected(state, metatableName, selected);
+    }
+
+  private:
+    using Candidates =
+        std::tuple<typename ConstructorImplementation<T, Descriptors>::Type...>;
+
+    template <std::size_t... Indices>
+    [[nodiscard]] std::pair<std::size_t, std::size_t>
+    matching_index_impl(lua_State *state,
+                        std::index_sequence<Indices...>) const {
+        std::size_t selected = sizeof...(Descriptors);
+        std::size_t count = 0;
+        (
+            [&] {
+                if (std::get<Indices>(m_candidates).matches(state)) {
+                    selected = Indices;
+                    ++count;
+                }
+            }(),
+            ...);
+        return {selected, count};
+    }
+
+    [[nodiscard]] std::pair<std::size_t, std::size_t>
+    matching_index(lua_State *state) const {
+        return matching_index_impl(state,
+                                   std::index_sequence_for<Descriptors...>{});
+    }
+
+    template <std::size_t Index = 0>
+    int create_selected(lua_State *state, std::string_view metatableName,
+                        std::size_t selected) {
+        if constexpr (Index < sizeof...(Descriptors)) {
+            if (selected == Index) {
+                return std::get<Index>(m_candidates)
+                    .create(state, metatableName);
+            }
+            return create_selected<Index + 1>(state, metatableName, selected);
+        }
+        throw std::logic_error("constructor overload index is invalid");
+    }
+
+    Candidates m_candidates;
 };
 
 template <typename Method> struct MethodTraits;
@@ -501,7 +673,21 @@ class MemberMethod final : public UserdataMember {
         return invoke(state, object, static_cast<Arguments *>(nullptr));
     }
 
+    [[nodiscard]] bool matches(lua_State *state) const override {
+        using Arguments = typename MethodTraits<Method>::Arguments;
+        return lua_gettop(state) ==
+                   static_cast<int>(std::tuple_size_v<Arguments>) + 1 &&
+               matches_arguments(state, Arguments{});
+    }
+
   private:
+    template <typename... Args>
+    [[nodiscard]] bool matches_arguments(lua_State *state,
+                                         std::tuple<Args...>) const {
+        return arguments_match<Args...>(state, 2,
+                                        std::index_sequence_for<Args...>{});
+    }
+
     template <typename... Args>
     int invoke(lua_State *state, T *object, std::tuple<Args...> *) {
         auto arguments = read_arguments<Args...>(
@@ -530,6 +716,91 @@ class MemberMethod final : public UserdataMember {
     std::string m_name;
     Method m_method;
     const UserdataType *m_type;
+};
+
+template <typename T, typename... Methods>
+class OverloadedMemberMethod final : public UserdataMember {
+  public:
+    OverloadedMemberMethod(std::string name, std::tuple<Methods...> methods,
+                           const UserdataType *type)
+        : m_name(std::move(name)),
+          m_methods(make_methods(m_name, std::move(methods), type,
+                                 std::index_sequence_for<Methods...>{})) {
+    }
+
+    [[nodiscard]] std::string_view name() const noexcept override {
+        return m_name;
+    }
+    [[nodiscard]] Kind kind() const noexcept override {
+        return Kind::Method;
+    }
+    int get(lua_State *) override {
+        return 0;
+    }
+    int set(lua_State *) override {
+        throw std::invalid_argument("methods cannot be assigned");
+    }
+    [[nodiscard]] bool matches(lua_State *state) const override {
+        return matching_index(state).second == 1;
+    }
+    int call(lua_State *state) override {
+        const auto [selected, count] = matching_index(state);
+        if (count == 0) {
+            throw std::invalid_argument("no overload of method '" + m_name +
+                                        "' matches the supplied arguments");
+        }
+        if (count > 1) {
+            throw std::invalid_argument("call to overloaded method '" + m_name +
+                                        "' is ambiguous");
+        }
+        return call_selected(state, selected);
+    }
+
+  private:
+    template <std::size_t... Indices>
+    static auto
+    make_methods(const std::string &name, std::tuple<Methods...> methods,
+                 const UserdataType *type, std::index_sequence<Indices...>) {
+        return std::tuple<MemberMethod<T, Methods>...>{MemberMethod<T, Methods>(
+            name, std::get<Indices>(methods), type)...};
+    }
+
+    template <std::size_t... Indices>
+    [[nodiscard]] std::pair<std::size_t, std::size_t>
+    matching_index_impl(lua_State *state,
+                        std::index_sequence<Indices...>) const {
+        std::size_t selected = sizeof...(Methods);
+        std::size_t count = 0;
+        (
+            [&] {
+                if (std::get<Indices>(m_methods).matches(state)) {
+                    selected = Indices;
+                    ++count;
+                }
+            }(),
+            ...);
+        return {selected, count};
+    }
+
+    [[nodiscard]] std::pair<std::size_t, std::size_t>
+    matching_index(lua_State *state) const {
+        return matching_index_impl(state,
+                                   std::index_sequence_for<Methods...>{});
+    }
+
+    template <std::size_t Index = 0>
+    int call_selected(lua_State *state, std::size_t selected) {
+        if constexpr (Index < sizeof...(Methods)) {
+            if (selected == Index) {
+                return std::get<Index>(m_methods).call(state);
+            }
+            return call_selected<Index + 1>(state, selected);
+        }
+        throw std::logic_error("overload dispatch index is invalid");
+    }
+
+    std::string m_name;
+    std::tuple<MemberMethod<T, Methods>...> m_methods;
 };
 
 template <typename T, typename Member>
@@ -695,6 +966,24 @@ void add_descriptor(const std::shared_ptr<UserdataType> &type,
         std::move(descriptor.name), descriptor.method, type.get()));
 }
 
+template <typename T, typename... Methods>
+void add_descriptor(const std::shared_ptr<UserdataType> &type,
+                    MethodOverloadRegistration<T, Methods...> descriptor) {
+    static_assert(sizeof...(Methods) > 1,
+                  "method overload requires at least two candidates");
+    static_assert(
+        (std::same_as<T, typename MemberFunctionClass<Methods>::Type> && ...),
+        "overloaded methods must belong to the registered usertype");
+    if (type->find(descriptor.name) != nullptr) {
+        throw std::invalid_argument("duplicate usertype member '" +
+                                    descriptor.name + "'");
+    }
+    type->members.push_back(
+        std::make_unique<OverloadedMemberMethod<T, Methods...>>(
+            std::move(descriptor.name), std::move(descriptor.methods),
+            type.get()));
+}
+
 template <typename T, typename ConstructorType, typename... Args>
 void add_descriptor(const std::shared_ptr<UserdataType> &type,
                     ConstructorDescriptor<ConstructorType, Args...>) {
@@ -706,6 +995,21 @@ void add_descriptor(const std::shared_ptr<UserdataType> &type,
     }
     type->constructor =
         std::make_unique<DefaultUserdataConstructor<T, Args...>>();
+}
+
+template <typename T, typename... Descriptors>
+void add_descriptor(const std::shared_ptr<UserdataType> &type,
+                    ConstructorsDescriptor<Descriptors...> descriptor) {
+    if (type->constructor) {
+        throw std::invalid_argument("usertype constructors were registered "
+                                    "more than once");
+    }
+    type->constructor =
+        std::make_unique<OverloadedUserdataConstructor<T, Descriptors...>>();
+    static_assert(
+        (std::same_as<T, typename ConstructorClass<Descriptors>::Type> && ...),
+        "constructors must belong to the registered usertype");
+    (void)descriptor;
 }
 
 template <typename T, typename... Descriptors>
