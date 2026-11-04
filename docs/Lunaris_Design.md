@@ -701,21 +701,26 @@ but the non-throwing Result API is preferred for engine code.
 
 # 20. Compiler and Bytecode
 
-Luau source is compiled to bytecode and then loaded into the VM.
-
-Lunaris exposes this as:
+Luau source is compiled and loaded with `State::load_script`. The returned
+move-only `Script` owns a registry reference and can be executed repeatedly:
 
 ```cpp
-auto bytecode =
-    lua.compile(source);
+auto loaded =
+    lua.load_script(source, "game://scripts/player.luau");
 
-auto chunk =
-    lua.load(bytecode);
+if (loaded)
+{
+    auto execution =
+        loaded.value().execute();
+}
 ```
 
-The exact bytecode representation follows the Luau version used by the repository.
+Compile, load, and runtime failures are returned as structured errors. Script
+execution restores the State stack and currently converts scalar return values
+only. Public compiler options, explicit bytecode ownership/version checks, and
+bytecode caching remain future work.
 
-`Bytecode` is an explicit wrapper type.
+The exact bytecode representation follows the Luau version used by the repository.
 
 ---
 
@@ -2155,7 +2160,9 @@ are unstable.
 - `StateConfig` and custom allocator support.
 - Unit tests for State lifetime, allocator use, and move ownership.
 
-This is the current starting point.
+This was the original starting point. The State foundation, scalar values,
+tables, structured errors, and global access are implemented and covered by
+unit tests.
 
 ## Phase 1: State Resources and Core Values
 
@@ -2191,17 +2198,20 @@ behavior is documented and tested.
 
 ## Phase 4: Compilation and Bytecode
 
-- Add compiler configuration and compilation.
-- Add bytecode ownership, loading, and version checks.
+- Compile source with Luau's default compiler options and load it into a State.
+- Add explicit bytecode ownership, loading, and version checks.
 - Add bytecode cache and pluggable cache storage.
 
-**Exit criteria:** source-to-bytecode-to-execution and cache invalidation paths
-are covered by integration tests.
+The first source-to-bytecode-to-execution slice is implemented through
+`State::load_script` and `Script::execute`. Public compiler options, bytecode
+ownership, and caching remain future work.
+
+**Exit criteria:** source-to-bytecode-to-execution and load/execute error paths
+are covered by tests.
 
 ## Phase 5: Scripts and Environments
 
-- Add standalone script loading and execution.
-- Add script environments and documented isolation behavior.
+- Add standalone script environments and documented isolation behavior.
 - Implement the agreed reload modes and standalone-script hot reload.
 
 **Exit criteria:** scripts can execute independently; reload and failure

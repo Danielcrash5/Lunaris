@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lunaris/Result.h"
+#include "lunaris/Script.h"
 #include "lunaris/StateConfig.h"
 #include "lunaris/Table.h"
 #include "lunaris/Value.h"
@@ -101,6 +102,13 @@ class State {
     /// byte.
     [[nodiscard]] Result<void> set_global(std::string_view name,
                                           const Value &value);
+
+    /// Compiles and loads a source chunk into this State.
+    /// The returned script can be executed more than once.
+    /// @return A Script, or a Compile, Load, or Memory error.
+    /// @throws std::logic_error if this State has been moved from.
+    [[nodiscard]] Result<Script> load_script(std::string_view source,
+                                             std::string_view chunkName);
 
     /// Pushes an integer onto the Luau stack.
     template <std::integral T>

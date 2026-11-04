@@ -21,6 +21,7 @@ add_subdirectory(thirdparty/luau EXCLUDE_FROM_ALL)
 
 add_library(lunaris
     src/Error.cpp
+    src/Script.cpp
     src/State.cpp
     src/Table.cpp
 )
@@ -32,7 +33,7 @@ target_include_directories(lunaris
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(lunaris PUBLIC Luau.VM)
+target_link_libraries(lunaris PUBLIC Luau.VM PRIVATE Luau.Compiler)
 
 if (MSVC)
     target_compile_options(lunaris PRIVATE /W4 /permissive-)

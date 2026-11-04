@@ -2,9 +2,16 @@
 
 #include <lua.h>
 
+#include <Luau/Allocator.h>
+#include <Luau/BytecodeBuilder.h>
+#include <Luau/Compiler.h>
+#include <Luau/Parser.h>
+
 #include <cstdlib>
+#include <exception>
 #include <limits>
 #include <new>
+#include <string>
 #include <utility>
 
 namespace lunaris {
@@ -241,6 +248,67 @@ Result<void> State::set_global(std::string_view name, const Value &value) {
     push(value);
     lua_setglobal(state, globalName.c_str());
     return Result<void>::success();
+}
+
+Result<Script> State::load_script(std::string_view source,
+                                  std::string_view chunkName) {
+    lua_State *state = checked_state();
+    if (chunkName.find('\0') != std::string_view::npos) {
+        return Result<Script>::failure(
+            Error(ErrorType::Load, "chunk name contains an embedded null byte",
+                  std::string(chunkName)));
+    }
+
+    const std::string sourceText(source);
+    const std::string sourceName(chunkName);
+    std::string bytecode;
+    try {
+        Luau::Allocator allocator;
+        Luau::AstNameTable names(allocator);
+        Luau::ParseResult parseResult = Luau::Parser::parse(
+            sourceText.c_str(), sourceText.size(), names, allocator);
+        if (!parseResult.errors.empty()) {
+            const Luau::ParseError &parseError = parseResult.errors.front();
+            const Luau::Location &location = parseError.getLocation();
+            return Result<Script>::failure(
+                Error(ErrorType::Compile, parseError.what(), sourceName,
+                      location.begin.line + 1, location.begin.column + 1));
+        }
+
+        Luau::BytecodeBuilder bytecodeBuilder;
+        Luau::compileOrThrow(bytecodeBuilder, parseResult, names);
+        bytecode = bytecodeBuilder.getBytecode();
+    } catch (const Luau::CompileError &exception) {
+        const Luau::Location &location = exception.getLocation();
+        return Result<Script>::failure(
+            Error(ErrorType::Compile, exception.what(), sourceName,
+                  location.begin.line + 1, location.begin.column + 1));
+    } catch (const std::bad_alloc &) {
+        return Result<Script>::failure(
+            Error(ErrorType::Memory, "out of memory while compiling script",
+                  sourceName));
+    } catch (const std::exception &exception) {
+        return Result<Script>::failure(
+            Error(ErrorType::Compile, exception.what(), sourceName));
+    }
+
+    StackRestore restore(state);
+    const int loadStatus = luau_load(state, sourceName.c_str(), bytecode.data(),
+                                     bytecode.size(), 0);
+    if (loadStatus != LUA_OK) {
+        std::size_t messageLength = 0;
+        const char *message = lua_tolstring(state, -1, &messageLength);
+        const ErrorType errorType =
+            loadStatus == LUA_ERRMEM ? ErrorType::Memory : ErrorType::Load;
+        return Result<Script>::failure(
+            Error(errorType,
+                  message != nullptr ? std::string(message, messageLength)
+                                     : "failed to load Luau bytecode",
+                  sourceName));
+    }
+
+    const int reference = lua_ref(state, -1);
+    return Result<Script>::success(Script(m_lifetime, reference, sourceName));
 }
 
 void State::validate_index(int index) const {
