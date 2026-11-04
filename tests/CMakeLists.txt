@@ -1,6 +1,7 @@
 include(GoogleTest)
 
 add_executable(lunaris_tests
+    Unit/ErrorTests.cpp
     Unit/StateTests.cpp
     Unit/TableTests.cpp
     Unit/ValueStackTests.cpp

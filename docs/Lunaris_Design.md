@@ -624,7 +624,9 @@ Enums are a wrapper/library feature. No changes to the Luau parser or language a
 
 # 19. Error Handling
 
-Errors should be represented as structured C++ errors.
+Fallible Luau operations return `Result<T>` or `Result<void>`. A failed
+operation contains an `Error`; misuse of the C++ wrapper API, such as an
+invalid stack index, may still throw a standard exception.
 
 Conceptually:
 
@@ -639,26 +641,16 @@ enum class ErrorType
 };
 ```
 
-```cpp
-class Error
-{
-public:
-    ErrorType type() const;
-
-    std::string_view message() const;
-    std::string_view source() const;
-
-    int line() const;
-    int column() const;
-};
-```
-
-The preferred primary API is a `Result<T, Error>`-style interface.
+`Error` exposes `type()`, `message()`, `source()`, `line()`, and `column()`.
+Line and column are one-based; unavailable source locations use `-1`, and an
+unavailable source identifier is empty. `Result<T>` exposes `has_value()`,
+boolean conversion, `value()`, and `error()`. Accessing the inactive
+alternative throws `std::logic_error`.
 
 Example:
 
 ```cpp
-auto result =
+Result<void> result =
     script.execute();
 
 if (!result)
@@ -679,7 +671,7 @@ if (!result)
 Function calls can use the same mechanism:
 
 ```cpp
-auto result =
+Result<std::vector<Value>> result =
     lua["Update"].call(0.016f);
 
 if (!result)
@@ -1859,7 +1851,6 @@ tests/
 │   ├── StateTests.cpp
 │   ├── TableTests.cpp
 │   ├── ValueStackTests.cpp
-│   ├── TableTests.cpp
 │   ├── FunctionTests.cpp
 │   ├── BindingTests.cpp
 │   ├── UserdataTests.cpp
@@ -1901,7 +1892,7 @@ tests/
 | Bindings | free functions, lambdas, member methods, const methods, properties, read-only properties, constructors, overload resolution |
 | Userdata | type checks, ownership, destruction, Local/Transferable/Shared policy enforcement |
 | Allocator | allocate/reallocate/free accounting, peak/current bytes, memory-limit boundary and over-limit failures, failed reallocation preserving old storage, custom allocator integration, user-data lifetime |
-| Errors | compile, load, runtime, type and memory errors; source/line/column when Luau provides them |
+| Errors and Result | all error categories, optional source locations, value/void success and failure, move-only values, and invalid-alternative access |
 | Compiler/bytecode | valid and invalid source, compile/load round trip, version compatibility checks |
 | Bytecode cache | hit, miss, source-hash invalidation, compiler-version invalidation, bytecode-version invalidation, storage failures |
 | Scripts | isolated environments, execute, reset, repeated execution, reload modes |
@@ -2034,6 +2025,8 @@ Lunaris/
 ├── include/
 │   └── lunaris/
 │       ├── State.h
+│       ├── Error.h
+│       ├── Result.h
 │       ├── Value.h
 │       ├── Table.h
 │       ├── Function.h

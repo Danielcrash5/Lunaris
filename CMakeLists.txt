@@ -20,6 +20,7 @@ endif()
 add_subdirectory(thirdparty/luau EXCLUDE_FROM_ALL)
 
 add_library(lunaris
+    src/Error.cpp
     src/State.cpp
     src/Table.cpp
 )
