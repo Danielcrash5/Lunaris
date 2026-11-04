@@ -3,7 +3,11 @@
 #include "lunaris/Bytecode.h"
 #include "lunaris/Result.h"
 
+#include <atomic>
+#include <functional>
+#include <list>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -22,6 +26,11 @@ struct SharedTableRegistryData;
 
 namespace lunaris::detail {
 
+struct PendingResume {
+    std::shared_ptr<std::atomic_bool> ready;
+    std::function<Result<void>(lua_State *)> resume;
+};
+
 struct StateLifetime {
     struct ModuleCacheEntry {
         int reference = -1;
@@ -39,6 +48,8 @@ struct StateLifetime {
     std::vector<std::string> loadingModules;
     std::vector<std::shared_ptr<void>> bindingRegistrations;
     std::unordered_map<std::string, void *> bindingTypes;
+    std::mutex pendingResumesMutex;
+    std::list<std::shared_ptr<PendingResume>> pendingResumes;
 };
 
 void install_module_loader(lua_State *state,

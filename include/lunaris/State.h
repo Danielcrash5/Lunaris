@@ -3,6 +3,7 @@
 #include "lunaris/Binding.h"
 #include "lunaris/Bytecode.h"
 #include "lunaris/BytecodeCache.h"
+#include "lunaris/Future.h"
 #include "lunaris/Library.h"
 #include "lunaris/ModuleLoader.h"
 #include "lunaris/Result.h"
@@ -144,6 +145,20 @@ class State {
     /// @throws std::invalid_argument if an option is outside its supported
     /// range.
     void set_compiler_options(CompilerOptions options);
+
+    /// Publishes a Future<Value> as a global with a yieldable `await()` method.
+    /// Awaiting coroutines are resumed only by resume_ready(), which the host
+    /// must call on this State's execution context.
+    void set_future_global(std::string_view name, Future<Value> future);
+
+    /// Opens Luau's coroutine library as the `coroutine` global.
+    /// Existing globals are not replaced.
+    void open_coroutine_library();
+
+    /// Resumes coroutines whose awaited Futures are ready.
+    /// Must be called on this State's execution context, never concurrently
+    /// with other access to this State.
+    [[nodiscard]] Result<std::size_t> resume_ready();
 
     /// Installs optional bytecode cache storage; passing nullptr disables it.
     void

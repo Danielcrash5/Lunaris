@@ -25,6 +25,7 @@ add_library(lunaris
     src/Bytecode.cpp
     src/BytecodeCache.cpp
     src/Error.cpp
+    src/Future.cpp
     src/Library.cpp
     src/ModuleLoader.cpp
     src/Script.cpp

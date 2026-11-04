@@ -3,6 +3,7 @@
 #include "lunaris/Error.h"
 #include "lunaris/Result.h"
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <memory>
@@ -11,6 +12,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace lunaris {
 
@@ -25,7 +27,20 @@ template <typename T> struct FutureState {
     bool broken = false;
     bool futureRetrieved = false;
     bool resultConsumed = false;
+    std::vector<std::weak_ptr<std::atomic_bool>> readinessSignals;
 };
+
+template <typename T> void mark_ready(FutureState<T> &state) noexcept {
+    for (auto iterator = state.readinessSignals.begin();
+         iterator != state.readinessSignals.end();) {
+        if (auto signal = iterator->lock()) {
+            signal->store(true, std::memory_order_release);
+            ++iterator;
+        } else {
+            iterator = state.readinessSignals.erase(iterator);
+        }
+    }
+}
 
 } // namespace detail
 
@@ -109,9 +124,26 @@ template <typename T> class Future {
             }
             state->result.emplace(Result<T>::failure(
                 Error(ErrorType::Cancelled, "Future was cancelled")));
+            detail::mark_ready(*state);
         }
         state->condition.notify_all();
         return true;
+    }
+
+    /// Registers a thread-safe readiness signal for host-driven polling.
+    /// The signal is set when the Future resolves, fails, is cancelled, or
+    /// its Promise is abandoned.
+    void observe_ready(const std::shared_ptr<std::atomic_bool> &signal) const {
+        if (signal == nullptr) {
+            throw std::invalid_argument("Future readiness signal is null");
+        }
+        const auto state = checked_state();
+        std::lock_guard lock(state->mutex);
+        if (state->result || state->broken) {
+            signal->store(true, std::memory_order_release);
+            return;
+        }
+        state->readinessSignals.emplace_back(signal);
     }
 
   private:
@@ -176,6 +208,11 @@ template <typename T> class Promise {
         return complete(Result<T>::failure(std::move(error)));
     }
 
+    [[nodiscard]] bool cancel() {
+        return complete(Result<T>::failure(
+            Error(ErrorType::Cancelled, "Future was cancelled")));
+    }
+
     [[nodiscard]] bool set_result(Result<T> result) {
         return complete(std::move(result));
     }
@@ -197,6 +234,7 @@ template <typename T> class Promise {
                 return false;
             }
             state->result.emplace(std::move(result));
+            detail::mark_ready(*state);
         }
         state->condition.notify_all();
         return true;
@@ -212,6 +250,7 @@ template <typename T> class Promise {
                 return;
             }
             m_state->broken = true;
+            detail::mark_ready(*m_state);
         }
         m_state->condition.notify_all();
     }
@@ -260,6 +299,11 @@ template <> class Promise<void> {
         return complete(Result<void>::failure(std::move(error)));
     }
 
+    [[nodiscard]] bool cancel() {
+        return complete(Result<void>::failure(
+            Error(ErrorType::Cancelled, "Future was cancelled")));
+    }
+
     [[nodiscard]] bool set_result(Result<void> result) {
         return complete(std::move(result));
     }
@@ -281,6 +325,7 @@ template <> class Promise<void> {
                 return false;
             }
             state->result.emplace(std::move(result));
+            detail::mark_ready(*state);
         }
         state->condition.notify_all();
         return true;
@@ -296,6 +341,7 @@ template <> class Promise<void> {
                 return;
             }
             m_state->broken = true;
+            detail::mark_ready(*m_state);
         }
         m_state->condition.notify_all();
     }

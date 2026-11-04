@@ -1706,12 +1706,20 @@ auto result = future.get();
 Luau:
 
 ```lua
-local future = task.spawn(function()
-    return expensiveCalculation()
+local coroutineHandle = coroutine.create(function()
+    local result = future:await()
 end)
 
-local result = future:await()
+coroutine.resume(coroutineHandle)
 ```
+
+`Future:await()` is yieldable and never blocks the State. The host publishes a
+`Future<Value>` to a State with `State::set_future_global()`, then calls
+`State::resume_ready()` on that State's execution context to resume coroutines
+whose futures have completed. A Future failure or cancellation becomes a
+Luau error when resumed. Awaiting a pending Future outside a yieldable
+coroutine is an error. Enable Luau coroutines explicitly with
+`State::open_coroutine_library()`. Future results remain single-consumer.
 
 ---
 
@@ -2451,9 +2459,11 @@ delivery of topic/payload messages, blocking and non-blocking receive, and
 drain-on-close behavior. A host-owned `Scheduler` interface and C++ `Actor`
 mailbox/handler seam provide explicit, host-driven dispatch. Luau Actor handles
 can send scalar messages to C++-bound handlers and bind Luau callbacks that
-execute during host-driven dispatch. Luau `await`, task spawning, parallel
-message callbacks, transferable userdata, and automated scheduler integration
-remain open.
+execute during host-driven dispatch. Luau `Future<Value>:await()` yields a
+coroutine and `State::resume_ready()` resumes it on the host-selected State
+context; no State is accessed from the Future completion thread. Task spawning,
+parallel message callbacks, transferable userdata, and automated scheduler
+integration remain open.
 
 ## Phase 9: Optional Integrations and Release Readiness
 
