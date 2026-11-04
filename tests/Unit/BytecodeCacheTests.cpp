@@ -196,4 +196,49 @@ TEST(BytecodeCacheTests, SurfacesStoreAndRemovalFailures) {
 TEST(BytecodeCacheTests, KeyIncludesSourceContent) {
     EXPECT_NE(lunaris::BytecodeCache::key_for("return 1"),
               lunaris::BytecodeCache::key_for("return 2"));
+    lunaris::CompilerOptions options;
+    options.debugLevel = 2;
+    EXPECT_NE(lunaris::BytecodeCache::key_for("return 1"),
+              lunaris::BytecodeCache::key_for("return 1", options));
+}
+
+TEST(BytecodeCacheTests, StateLoadScriptUsesConfiguredCacheAndOptions) {
+    auto storage = std::make_shared<MemoryBytecodeCache>();
+    lunaris::State state;
+    state.set_bytecode_cache_storage(storage);
+
+    lunaris::CompilerOptions options;
+    options.debugLevel = 2;
+    state.set_compiler_options(options);
+    auto first = state.load_script("return 23", "first.luau");
+    ASSERT_TRUE(first);
+    auto second = state.load_script("return 23", "second.luau");
+    ASSERT_TRUE(second);
+    EXPECT_EQ(storage->loadCount, 2);
+    EXPECT_EQ(storage->storeCount, 1);
+
+    options.optimizationLevel = 0;
+    state.set_compiler_options(options);
+    auto with_other_options = state.load_script("return 23", "third.luau");
+    ASSERT_TRUE(with_other_options);
+    EXPECT_EQ(storage->storeCount, 2);
+    EXPECT_EQ(storage->entries.size(), 2U);
+
+    auto execution = with_other_options.value().execute();
+    ASSERT_TRUE(execution) << execution.error().message();
+    ASSERT_EQ(execution.value().size(), 1U);
+    EXPECT_EQ(std::get<double>(execution.value()[0]), 23.0);
+}
+
+TEST(BytecodeCacheTests, StateLoadScriptSurfacesCacheFailures) {
+    auto storage = std::make_shared<FailingBytecodeCache>(
+        FailingBytecodeCache::Operation::Load);
+    lunaris::State state;
+    state.set_bytecode_cache_storage(storage);
+
+    auto result = state.load_script("return 1", "cached.luau");
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().type(), lunaris::ErrorType::Cache);
+    EXPECT_EQ(result.error().message(), "storage unavailable");
 }

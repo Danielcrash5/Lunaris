@@ -808,7 +808,7 @@ Compile, load, and runtime failures are returned as structured errors. Script
 execution restores the State stack and currently converts scalar return values
 only. Bytecode blobs can be reconstructed from owned binary data; bytecode
 version headers are checked before loading, while complete bytecode validation
-is performed by Luau's loader. Public compiler options remain future work.
+is performed by Luau's loader.
 
 The exact bytecode representation follows the Luau version used by the repository.
 
@@ -817,12 +817,12 @@ The exact bytecode representation follows the Luau version used by the repositor
 # 21. Bytecode Cache
 
 `BytecodeCache::compile` checks caller-provided storage before compiling. Its
-key includes a stable source hash, source length, compiler cache version, and
-Luau target bytecode/type versions. Cache entries also retain the full source
-and version metadata, so hash collisions or stale entries cannot return
-bytecode for different source. The compiler cache version must be incremented
-when Luau compiler behavior or compiler options change without a bytecode
-version change.
+key includes a stable source hash, source length, compiler cache version,
+compiler option levels, and Luau target bytecode/type versions. Cache entries
+also retain the full source and version metadata, so hash collisions or stale
+entries cannot return bytecode for different source or options. The compiler
+cache version must be incremented when Luau compiler behavior changes without
+a bytecode version change.
 
 Storage is pluggable and does not require a physical filesystem:
 
@@ -830,6 +830,12 @@ Storage is pluggable and does not require a physical filesystem:
 class BytecodeCacheStorage;
 auto result = BytecodeCache::compile(source, sourceIdentifier, storage);
 ```
+
+`State::load_script()` can use the same cache automatically after
+`State::set_bytecode_cache_storage()`. Set compiler settings with
+`State::set_compiler_options()`; they apply to later source loads and are part
+of the cache identity. Passing `nullptr` to the storage setter disables the
+cache.
 
 Possible implementations:
 
@@ -2296,13 +2302,19 @@ behavior is documented and tested.
 
 ## Phase 4: Compilation and Bytecode
 
-- Compile source with Luau's default compiler options and load it into a State.
+- Compile source with configurable Luau compiler options and load it into a
+  State.
 - Add explicit bytecode ownership, loading, and version checks.
 - Add bytecode cache and pluggable cache storage.
 
 Source compilation, owned bytecode loading/version checks, and execution are
 implemented through `Bytecode`, `State::load_bytecode`, `State::load_script`,
-and `Script::execute`. Public compiler options and caching remain future work.
+and `Script::execute`. `CompilerOptions` exposes Luau's optimization, debug,
+type-info, coverage, and vector-precision levels. States can configure options
+for future source loads and optionally install a shared
+`BytecodeCacheStorage`; `State::load_script()` then uses the cache. Cache keys
+include compiler options and bytecode/compiler versions, and storage failures
+are returned as cache errors.
 
 **Exit criteria:** source-to-bytecode-to-execution and load/execute error paths
 are covered by tests.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lunaris/Bytecode.h"
 #include "lunaris/Result.h"
 
 #include <memory>
@@ -13,7 +14,8 @@ struct lua_State;
 
 namespace lunaris {
 class ModuleLoader;
-}
+class BytecodeCacheStorage;
+} // namespace lunaris
 
 namespace lunaris::detail {
 
@@ -26,6 +28,8 @@ struct StateLifetime {
 
     lua_State *state = nullptr;
     std::shared_ptr<ModuleLoader> moduleLoader;
+    std::shared_ptr<BytecodeCacheStorage> bytecodeCacheStorage;
+    CompilerOptions compilerOptions;
     std::unordered_map<std::string, ModuleCacheEntry> moduleCache;
     std::unordered_map<std::string, int> nativeLibraryModules;
     std::vector<std::string> loadingModules;

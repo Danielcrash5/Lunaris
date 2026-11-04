@@ -9,13 +9,38 @@
 
 namespace lunaris {
 
+/// Supported Luau compiler settings.
+struct CompilerOptions {
+    /// Optimization level: 0 (none), 1 (baseline), or 2 (aggressive).
+    int optimizationLevel = 1;
+    /// Debug information: 0 (none), 1 (line/function), or 2 (full).
+    int debugLevel = 1;
+    /// Generate type information: 0 (native modules) or 1 (all modules).
+    int typeInfoLevel = 0;
+    /// Coverage instrumentation: 0 (none), 1 (statements), or 2 (expressions).
+    int coverageLevel = 0;
+    /// Vector component precision: 0 (float) or 1 (double).
+    int vectorPrecision = 0;
+
+    [[nodiscard]] constexpr bool is_valid() const noexcept {
+        return optimizationLevel >= 0 && optimizationLevel <= 2 &&
+               debugLevel >= 0 && debugLevel <= 2 && typeInfoLevel >= 0 &&
+               typeInfoLevel <= 1 && coverageLevel >= 0 && coverageLevel <= 2 &&
+               vectorPrecision >= 0 && vectorPrecision <= 1;
+    }
+
+    friend bool operator==(const CompilerOptions &,
+                           const CompilerOptions &) = default;
+};
+
 /// Owned, version-checked Luau bytecode.
 class Bytecode {
   public:
     /// Compiles Luau source using Luau's default compiler options.
     /// @return Compiled bytecode, or a Compile or Memory error.
     [[nodiscard]] static Result<Bytecode>
-    compile(std::string_view source, std::string_view sourceName = {});
+    compile(std::string_view source, std::string_view sourceName = {},
+            const CompilerOptions &options = {});
 
     /// Copies bytecode bytes after validating the Luau bytecode version header.
     /// Full bytecode validation occurs when it is loaded into a State.

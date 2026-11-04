@@ -2,6 +2,7 @@
 
 #include "lunaris/Binding.h"
 #include "lunaris/Bytecode.h"
+#include "lunaris/BytecodeCache.h"
 #include "lunaris/Library.h"
 #include "lunaris/ModuleLoader.h"
 #include "lunaris/Result.h"
@@ -133,10 +134,19 @@ class State {
     /// Compiles and loads a source chunk into this State.
     /// The returned script has its own global environment, falling back to
     /// State globals for reads, and can be executed more than once.
-    /// @return A Script, or a Compile, Load, or Memory error.
+    /// @return A Script, or a Compile, Load, Memory, or Cache error.
     /// @throws std::logic_error if this State has been moved from.
     [[nodiscard]] Result<Script> load_script(std::string_view source,
                                              std::string_view chunkName);
+
+    /// Sets the compiler options used by subsequent load_script calls.
+    /// @throws std::invalid_argument if an option is outside its supported
+    /// range.
+    void set_compiler_options(CompilerOptions options);
+
+    /// Installs optional bytecode cache storage; passing nullptr disables it.
+    void
+    set_bytecode_cache_storage(std::shared_ptr<BytecodeCacheStorage> storage);
 
     /// Loads owned Luau bytecode into this State as a Script with a private
     /// environment that falls back to State globals for reads.

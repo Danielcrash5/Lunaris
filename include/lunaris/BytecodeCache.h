@@ -16,6 +16,7 @@ struct BytecodeCacheEntry {
     std::string sourceIdentifier;
     std::uint64_t compilerVersion;
     std::uint64_t bytecodeVersion;
+    CompilerOptions compilerOptions;
 };
 
 /// Pluggable storage for compiled bytecode; implementations choose the backing
@@ -44,11 +45,12 @@ class BytecodeCache {
     /// @return Bytecode or a Compile, Memory, or Cache error.
     [[nodiscard]] static Result<Bytecode>
     compile(std::string_view source, std::string_view sourceIdentifier,
-            BytecodeCacheStorage &storage);
+            BytecodeCacheStorage &storage, const CompilerOptions &options = {});
 
     /// Returns a stable storage key derived from the source and compiler
     /// versions used by this Lunaris build.
-    [[nodiscard]] static std::string key_for(std::string_view source);
+    [[nodiscard]] static std::string
+    key_for(std::string_view source, const CompilerOptions &options = {});
 };
 
 } // namespace lunaris

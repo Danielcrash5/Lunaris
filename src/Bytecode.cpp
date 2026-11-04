@@ -31,7 +31,15 @@ Bytecode::Bytecode(std::string bytes, std::uint8_t version,
 }
 
 Result<Bytecode> Bytecode::compile(std::string_view source,
-                                   std::string_view sourceName) {
+                                   std::string_view sourceName,
+                                   const CompilerOptions &options) {
+    if (!options.is_valid()) {
+        return Result<Bytecode>::failure(Error(ErrorType::Compile,
+                                               "compiler option is outside its "
+                                               "supported range",
+                                               std::string(sourceName)));
+    }
+
     const std::string sourceText(source);
     const std::string sourceIdentifier(sourceName);
     try {
@@ -48,7 +56,13 @@ Result<Bytecode> Bytecode::compile(std::string_view source,
         }
 
         Luau::BytecodeBuilder bytecodeBuilder;
-        Luau::compileOrThrow(bytecodeBuilder, parseResult, names);
+        Luau::CompileOptions luauOptions;
+        luauOptions.optimizationLevel = options.optimizationLevel;
+        luauOptions.debugLevel = options.debugLevel;
+        luauOptions.typeInfoLevel = options.typeInfoLevel;
+        luauOptions.coverageLevel = options.coverageLevel;
+        luauOptions.vectorPrecision = options.vectorPrecision;
+        Luau::compileOrThrow(bytecodeBuilder, parseResult, names, luauOptions);
         std::string bytecode = bytecodeBuilder.getBytecode();
         return from_bytes(bytecode);
     } catch (const Luau::CompileError &exception) {

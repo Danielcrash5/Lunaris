@@ -31,17 +31,30 @@ Error cache_error(const Error &error) {
 
 } // namespace
 
-std::string BytecodeCache::key_for(std::string_view source) {
+std::string BytecodeCache::key_for(std::string_view source,
+                                   const CompilerOptions &options) {
     return std::to_string(kCompilerCacheVersion) + "-" +
            std::to_string(kBytecodeCacheVersion) + "-" +
+           std::to_string(options.optimizationLevel) + "-" +
+           std::to_string(options.debugLevel) + "-" +
+           std::to_string(options.typeInfoLevel) + "-" +
+           std::to_string(options.coverageLevel) + "-" +
+           std::to_string(options.vectorPrecision) + "-" +
            std::to_string(source.size()) + "-" +
            std::to_string(source_hash(source));
 }
 
 Result<Bytecode> BytecodeCache::compile(std::string_view source,
                                         std::string_view sourceIdentifier,
-                                        BytecodeCacheStorage &storage) {
-    const std::string key = key_for(source);
+                                        BytecodeCacheStorage &storage,
+                                        const CompilerOptions &options) {
+    if (!options.is_valid()) {
+        return Result<Bytecode>::failure(Error(ErrorType::Compile,
+                                               "compiler option is outside its "
+                                               "supported range",
+                                               std::string(sourceIdentifier)));
+    }
+    const std::string key = key_for(source, options);
     auto cached = storage.load(key);
     if (!cached) {
         return Result<Bytecode>::failure(cache_error(cached.error()));
@@ -51,7 +64,8 @@ Result<Bytecode> BytecodeCache::compile(std::string_view source,
         const BytecodeCacheEntry &entry = *cached.value();
         if (entry.source == source &&
             entry.compilerVersion == kCompilerCacheVersion &&
-            entry.bytecodeVersion == kBytecodeCacheVersion) {
+            entry.bytecodeVersion == kBytecodeCacheVersion &&
+            entry.compilerOptions == options) {
             return Result<Bytecode>::success(entry.bytecode);
         }
 
@@ -61,14 +75,17 @@ Result<Bytecode> BytecodeCache::compile(std::string_view source,
         }
     }
 
-    auto compiled = Bytecode::compile(source, sourceIdentifier);
+    auto compiled = Bytecode::compile(source, sourceIdentifier, options);
     if (!compiled) {
         return compiled;
     }
 
-    BytecodeCacheEntry entry{compiled.value(), std::string(source),
+    BytecodeCacheEntry entry{compiled.value(),
+                             std::string(source),
                              std::string(sourceIdentifier),
-                             kCompilerCacheVersion, kBytecodeCacheVersion};
+                             kCompilerCacheVersion,
+                             kBytecodeCacheVersion,
+                             options};
     auto stored = storage.store(key, entry);
     if (!stored) {
         return Result<Bytecode>::failure(cache_error(stored.error()));

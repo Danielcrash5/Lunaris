@@ -28,6 +28,24 @@ TEST(BytecodeTests, ReportsCompileErrorsWithSourceLocation) {
     EXPECT_GE(result.error().column(), 1);
 }
 
+TEST(BytecodeTests, ValidatesAndAppliesCompilerOptions) {
+    lunaris::CompilerOptions options;
+    options.debugLevel = 2;
+    auto bytecode = lunaris::Bytecode::compile("local value = 17; return value",
+                                               {}, options);
+    ASSERT_TRUE(bytecode);
+
+    options.optimizationLevel = 3;
+    auto invalid = lunaris::Bytecode::compile("return 17",
+                                              "invalid-options.luau", options);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().type(), lunaris::ErrorType::Compile);
+    EXPECT_EQ(invalid.error().source(), "invalid-options.luau");
+
+    lunaris::State state;
+    EXPECT_THROW(state.set_compiler_options(options), std::invalid_argument);
+}
+
 TEST(BytecodeTests, LoadsOwnedBytecodeIntoState) {
     auto bytecode = lunaris::Bytecode::compile("return 17");
     ASSERT_TRUE(bytecode);

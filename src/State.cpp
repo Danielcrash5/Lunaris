@@ -1,5 +1,7 @@
 #include "lunaris/State.h"
 
+#include "lunaris/BytecodeCache.h"
+
 #include <lua.h>
 
 #include <cstdlib>
@@ -275,6 +277,21 @@ void State::set_module_loader(std::shared_ptr<ModuleLoader> moduleLoader) {
     detail::install_module_loader(state, m_lifetime, std::move(moduleLoader));
 }
 
+void State::set_compiler_options(CompilerOptions options) {
+    (void)checked_state();
+    if (!options.is_valid()) {
+        throw std::invalid_argument(
+            "compiler option is outside its supported range");
+    }
+    m_lifetime->compilerOptions = options;
+}
+
+void State::set_bytecode_cache_storage(
+    std::shared_ptr<BytecodeCacheStorage> storage) {
+    (void)checked_state();
+    m_lifetime->bytecodeCacheStorage = std::move(storage);
+}
+
 Result<void> State::invalidate_module(std::string_view name) {
     (void)checked_state();
     return detail::invalidate_module(*m_lifetime, name);
@@ -294,7 +311,12 @@ Result<Script> State::load_script(std::string_view source,
                   std::string(chunkName)));
     }
 
-    auto bytecode = Bytecode::compile(source, chunkName);
+    auto bytecode =
+        m_lifetime->bytecodeCacheStorage
+            ? BytecodeCache::compile(source, chunkName,
+                                     *m_lifetime->bytecodeCacheStorage,
+                                     m_lifetime->compilerOptions)
+            : Bytecode::compile(source, chunkName, m_lifetime->compilerOptions);
     if (!bytecode) {
         return Result<Script>::failure(bytecode.error());
     }
