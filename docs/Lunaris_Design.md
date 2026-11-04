@@ -1107,32 +1107,41 @@ by `require` are not rewritten.
 
 ## 27.2 Optional LuaRocks Integration
 
-LuaRocks support is an optional build feature, controlled by
-`LUNARIS_ENABLE_LUAROCKS` and disabled by default. When disabled, the core
-Module Loader and Lunaris module providers remain available without LuaRocks
-discovery or loading code.
+LuaRocks source support is an optional build feature, controlled by
+`LUNARIS_ENABLE_LUAROCKS` and disabled by default. When disabled, no LuaRocks
+provider code is built and no LuaRocks dependency is discovered or linked.
+When enabled, `LuaRocksModuleProvider` resolves `.luau` and `.lua` source files
+from the configured `ModuleLoaderConfig` search roots and uses the existing
+`require(...)` implementation for execution and caching. Dotted module names
+map to paths, and `init.lua`/`init.luau` modules are supported.
 
-When enabled, Lunaris can discover and load already-installed LuaRocks
-packages through the same `require(...)` entry point. The initial scope is
-loading installed package contents; downloading or installing rocks is not
-part of the runtime. LuaRocks metadata and module mappings are used only to the
-extent they can be resolved to supported Luau modules and native modules.
-Packages written for standard Lua are not presumed to be compatible with
-Luau.
+The provider reads the installed rock tree directly; it does not invoke or
+require the LuaRocks executable at runtime. Configure a search root to one of
+the tree's Lua module directories, such as `share/lua/5.4`. LuaRocks 3.9.2 and
+Lua 5.4.6 were available during development, but installed Lua 5.4 code is
+not presumed to be Luau-compatible: incompatible source fails during Luau
+compilation. No rocks are downloaded or installed by Lunaris.
 
-Native C modules are supported only when they are built for the supported
-Lunaris/Luau module ABI and platform. Lunaris must not assume that a native
-module built for an arbitrary Lua version or implementation is ABI-compatible
-with Luau. If a compatible ABI or module entry point is unavailable, loading
-must fail with a clear diagnostic rather than attempting an unsafe fallback.
-The loader must also report unsupported package metadata or dependencies
-instead of silently treating them as successfully loaded.
+Enable the provider at configure time and use it like any other module
+provider:
 
-Loading a native module executes arbitrary native code in the host process.
-It is a trusted-code feature, not a sandbox boundary: disabling OS libraries
-or restricting Luau script environments cannot make an untrusted native
-module safe. Applications are responsible for controlling which installed
-rocks are discoverable and loadable.
+```cmake
+cmake -S . -B build -DLUNARIS_ENABLE_LUAROCKS=ON
+```
+
+```cpp
+auto provider = std::make_shared<lunaris::LuaRocksModuleProvider>();
+lunaris::ModuleLoaderConfig config;
+config.basePath = "C:/path/to/luarocks/share/lua/5.4";
+state.set_module_loader(
+    std::make_shared<lunaris::ModuleLoader>(provider, config));
+```
+
+Native Lua modules (`.dll`, `.so`, `.dylib`) are explicitly unsupported by
+this source provider, including modules compiled against Lua 5.4. Lunaris does
+not attempt to load an arbitrary Lua C ABI as if it were compatible with
+Luau. A future native-module feature requires a separately defined and
+validated Lunaris/Luau ABI.
 
 ---
 
@@ -2352,13 +2361,16 @@ are implemented and tested.
 ## Phase 7: Optional LuaRocks and Native Modules
 
 - Add `LUNARIS_ENABLE_LUAROCKS`, disabled by default.
-- Resolve already-installed, Luau-compatible package contents through the same
-  `require(...)` entry point; package installation remains out of scope.
-- Define and validate the supported native module ABI before loading C modules.
-- Fail clearly for incompatible modules or unsupported package metadata.
+- Resolve installed `.lua`/`.luau` source modules from configured rock-tree
+  paths through the existing `require(...)` entry point; installation remains
+  out of scope.
+- Reject native Lua C modules with an explicit unsupported-ABI diagnostic.
+- Keep any future compatible native module ABI separate from LuaRocks source
+  discovery.
 
-**Exit criteria:** both build configurations are tested. Native module loading
-is documented as trusted native code, not a sandbox boundary.
+The optional source provider is implemented and tested with the feature both
+disabled and enabled. Native module loading remains future work until Lunaris
+defines a compatible Luau ABI.
 
 ## Phase 8: Concurrency and Shared State
 

@@ -14,6 +14,10 @@ add_executable(lunaris_tests
     Unit/ValueStackTests.cpp
 )
 
+if (LUNARIS_ENABLE_LUAROCKS)
+    target_sources(lunaris_tests PRIVATE Unit/LuaRocksProviderTests.cpp)
+endif()
+
 target_link_libraries(lunaris_tests
     PRIVATE
         Lunaris::Lunaris

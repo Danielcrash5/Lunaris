@@ -4,6 +4,7 @@ project(Lunaris VERSION 0.1.0 LANGUAGES CXX)
 
 option(LUNARIS_BUILD_TESTS "Build Lunaris tests" ON)
 option(LUNARIS_BUILD_EXAMPLES "Build Lunaris examples" ON)
+option(LUNARIS_ENABLE_LUAROCKS "Enable LuaRocks source module provider" OFF)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -29,6 +30,10 @@ add_library(lunaris
     src/State.cpp
     src/Table.cpp
 )
+if (LUNARIS_ENABLE_LUAROCKS)
+    target_sources(lunaris PRIVATE src/LuaRocksProvider.cpp)
+    target_compile_definitions(lunaris PUBLIC LUNARIS_ENABLE_LUAROCKS=1)
+endif()
 add_library(Lunaris::Lunaris ALIAS lunaris)
 
 target_compile_features(lunaris PUBLIC cxx_std_23)
