@@ -1,9 +1,17 @@
 #pragma once
 
 #include "lunaris/StateConfig.h"
+#include "lunaris/Value.h"
 
 #include <cstddef>
+#include <concepts>
+#include <cstdint>
 #include <memory>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
 
 struct lua_State;
 
@@ -33,9 +41,89 @@ class State {
     /// Returns nullptr after the State has been moved from.
     [[nodiscard]] lua_State *native_handle() noexcept;
 
+    /// Returns the number of values currently on the Luau stack.
+    [[nodiscard]] int top() const;
+
+    /// Removes \p count values from the top of the stack.
+    /// @throws std::invalid_argument if count is negative.
+    /// @throws std::out_of_range if count exceeds the stack height.
+    void pop(int count = 1);
+
+    /// Removes all values from the Luau stack.
+    void clear();
+
+    /// Pushes nil onto the Luau stack.
+    void push(std::nullptr_t);
+
+    /// Pushes a boolean onto the Luau stack.
+    void push(bool value);
+
+    /// Pushes a floating-point number onto the Luau stack.
+    void push(double value);
+
+    /// Pushes a string onto the Luau stack.
+    void push(std::string_view value);
+
+    /// Pushes a string onto the Luau stack.
+    void push(const std::string &value) {
+        push(std::string_view(value));
+    }
+
+    /// Pushes an owned scalar value onto the Luau stack.
+    void push(const Value &value);
+
+    /// Pushes an integer onto the Luau stack.
+    template <std::integral T>
+        requires(!std::same_as<std::remove_cv_t<T>, bool>)
+    void push(T value) {
+        if (!std::in_range<std::int64_t>(value)) {
+            throw std::out_of_range("integer value is outside Luau's range");
+        }
+        push(static_cast<std::int64_t>(value));
+    }
+
+    /// Pushes a 64-bit integer onto the Luau stack.
+    void push(std::int64_t value);
+
+    /// Reads a scalar value from a stack index without removing it.
+    /// Integer reads require a Luau integer; floating-point reads accept both
+    /// Luau integer and number values. String and boolean reads are exact.
+    /// @throws std::out_of_range if index is invalid.
+    /// @throws std::invalid_argument if the stack value has an incompatible
+    /// type.
+    template <typename T>
+    [[nodiscard]] T get(int index) const {
+        validate_index(index);
+
+        if constexpr (std::same_as<T, Value>) {
+            return get_value(index);
+        } else if constexpr (std::same_as<T, bool>) {
+            return get_boolean(index);
+        } else if constexpr (std::integral<T>) {
+            const std::int64_t value = get_integer(index);
+            if (!std::in_range<T>(value)) {
+                throw std::out_of_range("Luau integer is outside the target range");
+            }
+            return static_cast<T>(value);
+        } else if constexpr (std::same_as<T, double>) {
+            return get_number(index);
+        } else if constexpr (std::same_as<T, std::string>) {
+            return get_string(index);
+        } else {
+            static_assert(!sizeof(T), "Unsupported type for State::get");
+        }
+    }
+
   private:
     struct AllocatorContext;
 
+    [[nodiscard]] lua_State *checked_state() const;
+    void validate_index(int index) const;
+    [[nodiscard]] bool get_boolean(int index) const;
+    [[nodiscard]] std::int64_t get_integer(int index) const;
+    [[nodiscard]] double get_number(int index) const;
+    [[nodiscard]] std::string get_string(int index) const;
+    [[nodiscard]] Value get_value(int index) const;
     static void *tracked_allocate(void *userData, void *pointer,
                                   std::size_t oldSize, std::size_t newSize);
 

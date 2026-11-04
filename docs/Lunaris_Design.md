@@ -324,6 +324,15 @@ The wrapper should not hide the existence of the Luau stack completely. Low-leve
 
 A higher-level `Value` abstraction is also provided.
 
+The initial `Value` abstraction owns scalar values only: `nil`, booleans,
+64-bit integers, floating-point numbers, and strings. Tables, functions,
+userdata, threads, and buffers require dedicated handles because their
+lifetime is tied to the Luau state. Stack reads do not pop values; `pop` and
+`clear` change the stack explicitly. Typed reads reject incompatible values
+and invalid indices instead of silently coercing them. A `double` read accepts
+both Luau integer and number values; integer reads require an integer value
+that fits the requested C++ type.
+
 ---
 
 # 10. Globals
@@ -1840,8 +1849,7 @@ tests/
 ├── CMakeLists.txt
 ├── Unit/
 │   ├── StateTests.cpp
-│   ├── ValueTests.cpp
-│   ├── StackTests.cpp
+│   ├── ValueStackTests.cpp
 │   ├── TableTests.cpp
 │   ├── FunctionTests.cpp
 │   ├── BindingTests.cpp

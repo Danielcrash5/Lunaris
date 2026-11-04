@@ -2,8 +2,8 @@
 
 #include <lua.h>
 
-#include <cstdlib>
 #include <limits>
+#include <cstdlib>
 #include <new>
 #include <utility>
 
@@ -107,6 +107,147 @@ State &State::operator=(State &&other) noexcept {
 
 lua_State *State::native_handle() noexcept {
     return m_state;
+}
+
+lua_State *State::checked_state() const {
+    if (m_state == nullptr) {
+        throw std::logic_error("operation on a moved-from Lunaris State");
+    }
+    return m_state;
+}
+
+int State::top() const {
+    return lua_gettop(checked_state());
+}
+
+void State::pop(int count) {
+    if (count < 0) {
+        throw std::invalid_argument("stack pop count cannot be negative");
+    }
+
+    lua_State *state = checked_state();
+    if (count > lua_gettop(state)) {
+        throw std::out_of_range("stack pop count exceeds stack height");
+    }
+    lua_settop(state, -count - 1);
+}
+
+void State::clear() {
+    lua_settop(checked_state(), 0);
+}
+
+void State::push(std::nullptr_t) {
+    lua_pushnil(checked_state());
+}
+
+void State::push(bool value) {
+    lua_pushboolean(checked_state(), value);
+}
+
+void State::push(std::int64_t value) {
+    lua_pushinteger64(checked_state(), value);
+}
+
+void State::push(double value) {
+    lua_pushnumber(checked_state(), value);
+}
+
+void State::push(std::string_view value) {
+    const char *data = value.empty() ? "" : value.data();
+    lua_pushlstring(checked_state(), data, value.size());
+}
+
+void State::push(const Value &value) {
+    std::visit(
+        [this](const auto &item) {
+            using T = std::decay_t<decltype(item)>;
+            if constexpr (std::same_as<T, std::monostate>) {
+                push(nullptr);
+            } else {
+                push(item);
+            }
+        },
+        value);
+}
+
+void State::validate_index(int index) const {
+    const int stackTop = lua_gettop(checked_state());
+    if (index == 0 || index > stackTop || index < -stackTop) {
+        throw std::out_of_range("Luau stack index is out of range");
+    }
+}
+
+bool State::get_boolean(int index) const {
+    lua_State *state = checked_state();
+    if (lua_type(state, index) != LUA_TBOOLEAN) {
+        throw std::invalid_argument("Luau value is not a boolean");
+    }
+    return lua_toboolean(state, index) != 0;
+}
+
+std::int64_t State::get_integer(int index) const {
+    lua_State *state = checked_state();
+    if (lua_type(state, index) != LUA_TINTEGER) {
+        throw std::invalid_argument("Luau value is not an integer");
+    }
+
+    int isInteger = 0;
+    const std::int64_t value = lua_tointeger64(state, index, &isInteger);
+    if (isInteger == 0) {
+        throw std::invalid_argument("Luau value is not an integer");
+    }
+    return value;
+}
+
+double State::get_number(int index) const {
+    lua_State *state = checked_state();
+    const int type = lua_type(state, index);
+    if (type == LUA_TINTEGER) {
+        return static_cast<double>(get_integer(index));
+    }
+    if (type != LUA_TNUMBER) {
+        throw std::invalid_argument("Luau value is not a number");
+    }
+
+    int isNumber = 0;
+    const double value = lua_tonumberx(state, index, &isNumber);
+    if (isNumber == 0) {
+        throw std::invalid_argument("Luau value is not a number");
+    }
+    return value;
+}
+
+std::string State::get_string(int index) const {
+    lua_State *state = checked_state();
+    if (lua_type(state, index) != LUA_TSTRING) {
+        throw std::invalid_argument("Luau value is not a string");
+    }
+
+    std::size_t length = 0;
+    const char *value = lua_tolstring(state, index, &length);
+    return std::string(value, length);
+}
+
+Value State::get_value(int index) const {
+    lua_State *state = checked_state();
+    switch (lua_type(state, index)) {
+    case LUA_TNIL:
+        return std::monostate{};
+    case LUA_TBOOLEAN:
+        return lua_toboolean(state, index) != 0;
+    case LUA_TNUMBER:
+        return get_number(index);
+    case LUA_TINTEGER:
+        return get_integer(index);
+    case LUA_TSTRING: {
+        std::size_t length = 0;
+        const char *value = lua_tolstring(state, index, &length);
+        return std::string(value, length);
+    }
+    default:
+        throw std::invalid_argument(
+            "Luau reference value is not supported by lunaris::Value");
+    }
 }
 
 } // namespace lunaris

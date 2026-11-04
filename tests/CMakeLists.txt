@@ -2,6 +2,7 @@ include(GoogleTest)
 
 add_executable(lunaris_tests
     Unit/StateTests.cpp
+    Unit/ValueStackTests.cpp
 )
 
 target_link_libraries(lunaris_tests
