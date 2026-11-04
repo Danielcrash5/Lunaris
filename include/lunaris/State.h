@@ -105,13 +105,15 @@ class State {
                                           const Value &value);
 
     /// Compiles and loads a source chunk into this State.
-    /// The returned script can be executed more than once.
+    /// The returned script has its own global environment, falling back to
+    /// State globals for reads, and can be executed more than once.
     /// @return A Script, or a Compile, Load, or Memory error.
     /// @throws std::logic_error if this State has been moved from.
     [[nodiscard]] Result<Script> load_script(std::string_view source,
                                              std::string_view chunkName);
 
-    /// Loads owned Luau bytecode into this State as a Script.
+    /// Loads owned Luau bytecode into this State as a Script with a private
+    /// environment that falls back to State globals for reads.
     /// Bytecode format and version errors are returned as Load errors.
     /// @throws std::logic_error if this State has been moved from.
     [[nodiscard]] Result<Script> load_bytecode(const Bytecode &bytecode,

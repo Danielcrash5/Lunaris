@@ -876,7 +876,16 @@ Script C
 
 Script-local globals remain isolated unless explicitly shared.
 
-The engine can provide common globals through the environment's fallback mechanism.
+Each script receives a fresh environment table whose `__index` points to the
+State's global table. Reads can therefore use host-provided globals, while
+assignments create or update script-local values and do not modify State
+globals. A script's environment persists across repeated executions of its
+compiled `Script`. C++ can inspect or update the environment through
+`Script::get_global` and `Script::set_global`; setting nil removes a local
+override and exposes the inherited value again.
+
+This is namespace isolation, not a security sandbox: State globals and
+capabilities exposed through them remain accessible to scripts.
 
 ---
 

@@ -36,15 +36,29 @@ class Script {
     /// currently supports scalar values only.
     [[nodiscard]] Result<std::vector<Value>> execute();
 
+    /// Reads a scalar from the script environment, including inherited State
+    /// globals; missing names return nil.
+    /// @return The value, or a Type error for reference values or invalid
+    /// names.
+    [[nodiscard]] Result<Value> get_global(std::string_view name) const;
+
+    /// Writes a scalar to this script's private environment.
+    /// Setting nil removes the script-local value and exposes any inherited
+    /// State global with the same name.
+    /// @return Success, or a Type error if the name contains a null byte.
+    [[nodiscard]] Result<void> set_global(std::string_view name,
+                                          const Value &value);
+
   private:
     friend class State;
 
     Script(std::weak_ptr<detail::StateLifetime> lifetime, int reference,
-           std::string source);
+           int environmentReference, std::string source);
     void release() noexcept;
 
     std::weak_ptr<detail::StateLifetime> m_lifetime;
     int m_reference = -1;
+    int m_environmentReference = -1;
     std::string m_source;
 };
 

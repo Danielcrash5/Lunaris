@@ -273,10 +273,18 @@ Result<Script> State::load_bytecode(const Bytecode &bytecode,
 
     StackRestore restore(state);
     const std::string sourceName(chunkName);
+    lua_newtable(state);
+    const int environmentIndex = lua_gettop(state);
+    lua_newtable(state);
+    lua_pushvalue(state, LUA_GLOBALSINDEX);
+    lua_setfield(state, -2, "__index");
+    lua_setmetatable(state, environmentIndex);
+    lua_setsafeenv(state, environmentIndex, false);
+
     const std::string_view bytecodeBytes = bytecode.bytes();
     const int loadStatus =
         luau_load(state, sourceName.c_str(), bytecodeBytes.data(),
-                  bytecodeBytes.size(), 0);
+                  bytecodeBytes.size(), environmentIndex);
     if (loadStatus != LUA_OK) {
         std::size_t messageLength = 0;
         const char *message = lua_tolstring(state, -1, &messageLength);
@@ -290,7 +298,10 @@ Result<Script> State::load_bytecode(const Bytecode &bytecode,
     }
 
     const int reference = lua_ref(state, -1);
-    return Result<Script>::success(Script(m_lifetime, reference, sourceName));
+    lua_pushvalue(state, environmentIndex);
+    const int environmentReference = lua_ref(state, -1);
+    return Result<Script>::success(
+        Script(m_lifetime, reference, environmentReference, sourceName));
 }
 
 void State::validate_index(int index) const {
