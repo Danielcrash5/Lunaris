@@ -12,6 +12,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -133,6 +134,26 @@ class State {
     void new_usertype(std::string_view name, Descriptors &&...descriptors) {
         detail::register_usertype<T>(checked_state(), m_lifetime, name,
                                      std::forward<Descriptors>(descriptors)...);
+    }
+
+    /// Registers an immutable Luau table containing enum member values.
+    template <typename Enum>
+    void
+    new_enum(std::string_view name,
+             std::initializer_list<std::pair<std::string_view, Enum>> values) {
+        static_assert(std::is_enum_v<Enum>,
+                      "new_enum requires a C++ enum type");
+        detail::register_named_values(checked_state(), name, values);
+    }
+
+    /// Registers an immutable Luau table containing bit-flag values.
+    template <typename Enum>
+    void
+    new_flags(std::string_view name,
+              std::initializer_list<std::pair<std::string_view, Enum>> values) {
+        static_assert(std::is_enum_v<Enum>,
+                      "new_flags requires a C++ enum type");
+        detail::register_named_values(checked_state(), name, values);
     }
 
     /// Invalidates a module and all cached modules that depend on it.

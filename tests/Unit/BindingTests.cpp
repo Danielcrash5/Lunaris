@@ -7,6 +7,9 @@
 
 namespace {
 
+enum class PlayerMode : std::int32_t { Idle = 0, Running = 1 };
+enum class RenderFlag : std::uint32_t { Visible = 1, CastShadow = 2 };
+
 struct Counter {
     Counter() = default;
     explicit Counter(int initialValue) : value(initialValue) {
@@ -30,6 +33,22 @@ struct Counter {
         health = newHealth;
     }
 
+    void set_mode(PlayerMode newMode) {
+        mode = newMode;
+    }
+
+    PlayerMode get_mode() const {
+        return mode;
+    }
+
+    void set_render_flag(RenderFlag newFlag) {
+        renderFlag = newFlag;
+    }
+
+    RenderFlag get_render_flag() const {
+        return renderFlag;
+    }
+
     std::string identify(int) const {
         return "integer";
     }
@@ -48,6 +67,8 @@ struct Counter {
 
     int value;
     int health = 100;
+    PlayerMode mode = PlayerMode::Idle;
+    RenderFlag renderFlag = RenderFlag::Visible;
     const int identifier = 7;
     std::string name;
 };
@@ -71,6 +92,12 @@ int LifetimeProbe::destroyed = 0;
 
 TEST(BindingTests, RegistersOwnedUsertypesWithPropertiesAndMethods) {
     lunaris::State state;
+    state.new_enum<PlayerMode>(
+        "PlayerMode",
+        {{"Idle", PlayerMode::Idle}, {"Running", PlayerMode::Running}});
+    state.new_flags<RenderFlag>("RenderFlags",
+                                {{"Visible", RenderFlag::Visible},
+                                 {"CastShadow", RenderFlag::CastShadow}});
     state.new_usertype<Counter>(
         "Counter",
         lunaris::constructors(
@@ -83,6 +110,10 @@ TEST(BindingTests, RegistersOwnedUsertypesWithPropertiesAndMethods) {
         lunaris::property("currentValue", &Counter::current),
         lunaris::method("add", &Counter::add),
         lunaris::method("current", &Counter::current),
+        lunaris::method("setMode", &Counter::set_mode),
+        lunaris::method("getMode", &Counter::get_mode),
+        lunaris::method("setRenderFlag", &Counter::set_render_flag),
+        lunaris::method("getRenderFlag", &Counter::get_render_flag),
         lunaris::method(
             "identify",
             lunaris::overload(
@@ -97,24 +128,38 @@ TEST(BindingTests, RegistersOwnedUsertypesWithPropertiesAndMethods) {
                 static_cast<int (Counter::*)(double) const>(
                     &Counter::choose))));
 
-    auto script = state.load_script("local counter = Counter.new(4); "
-                                    "counter:add(3); counter.value = 9; "
-                                    "counter.health = 75; "
-                                    "return counter:current(), "
-                                    "counter.currentValue, counter.health, "
-                                    "counter:identify(2), "
-                                    "counter:identify('x')",
-                                    "binding-test.luau");
-    ASSERT_TRUE(script);
+    auto script =
+        state.load_script("local counter = Counter.new(4); "
+                          "counter:add(3); counter.value = 9; "
+                          "counter.health = 75; "
+                          "counter:setMode(PlayerMode.Running); "
+                          "counter:setRenderFlag(RenderFlags.CastShadow); "
+                          "return counter:current(), "
+                          "counter.currentValue, counter.health, "
+                          "counter:identify(2), "
+                          "counter:identify('x'), "
+                          "counter:getMode(), "
+                          "counter:getRenderFlag(), "
+                          "PlayerMode.Idle, RenderFlags.Visible",
+                          "binding-test.luau");
+    ASSERT_TRUE(script) << script.error().message();
     auto result = script.value().execute();
 
     ASSERT_TRUE(result) << result.error().message();
-    ASSERT_EQ(result.value().size(), 5U);
+    ASSERT_EQ(result.value().size(), 9U);
     EXPECT_EQ(std::get<std::int64_t>(result.value()[0]), 9);
     EXPECT_EQ(std::get<std::int64_t>(result.value()[1]), 9);
     EXPECT_EQ(std::get<std::int64_t>(result.value()[2]), 75);
     EXPECT_EQ(std::get<std::string>(result.value()[3]), "integer");
     EXPECT_EQ(std::get<std::string>(result.value()[4]), "string");
+    EXPECT_EQ(std::get<std::int64_t>(result.value()[5]),
+              static_cast<std::int64_t>(PlayerMode::Running));
+    EXPECT_EQ(std::get<std::int64_t>(result.value()[6]),
+              static_cast<std::int64_t>(RenderFlag::CastShadow));
+    EXPECT_EQ(std::get<std::int64_t>(result.value()[7]),
+              static_cast<std::int64_t>(PlayerMode::Idle));
+    EXPECT_EQ(std::get<std::int64_t>(result.value()[8]),
+              static_cast<std::int64_t>(RenderFlag::Visible));
 }
 
 TEST(BindingTests, ReportsInvalidPropertyTypesAndUsertypeMismatches) {
@@ -277,4 +322,37 @@ TEST(BindingTests, RejectsRepeatedTypeAndMemberRegistration) {
                      lunaris::property("value", &Counter::value),
                      lunaris::property("value", &Counter::value)),
                  std::invalid_argument);
+}
+
+TEST(BindingTests, RejectsInvalidAndRepeatedEnumRegistrations) {
+    lunaris::State state;
+    state.new_enum<PlayerMode>(
+        "PlayerMode",
+        {{"Idle", PlayerMode::Idle}, {"Running", PlayerMode::Running}});
+    EXPECT_THROW(
+        state.new_enum<PlayerMode>("PlayerMode", {{"Idle", PlayerMode::Idle}}),
+        std::invalid_argument);
+    EXPECT_THROW(state.new_flags<RenderFlag>(
+                     "Invalid", {{"Visible", RenderFlag::Visible},
+                                 {"Visible", RenderFlag::CastShadow}}),
+                 std::invalid_argument);
+    EXPECT_THROW(
+        state.new_enum<PlayerMode>("BadName", {{"", PlayerMode::Idle}}),
+        std::invalid_argument);
+}
+
+TEST(BindingTests, EnumAndFlagTablesAreReadOnly) {
+    lunaris::State state;
+    state.new_enum<PlayerMode>(
+        "PlayerMode",
+        {{"Idle", PlayerMode::Idle}, {"Running", PlayerMode::Running}});
+    state.new_flags<RenderFlag>("RenderFlags",
+                                {{"Visible", RenderFlag::Visible},
+                                 {"CastShadow", RenderFlag::CastShadow}});
+
+    auto script = state.load_script(
+        "PlayerMode.Idle = 9; RenderFlags.Visible = 0", "readonly-enums.luau");
+    ASSERT_TRUE(script);
+    auto result = script.value().execute();
+    ASSERT_FALSE(result);
 }

@@ -505,12 +505,12 @@ The wrapper manages userdata, metatables, type checks and dispatch.
 
 The initial `State::new_usertype<T>` implementation supports State-local,
 Luau-owned objects created by `constructor<T, Args...>()` descriptors,
-mutable or read-only data-member properties, and non-overloaded member
-functions. Constructor and member arguments/results support booleans, numeric
-scalars, `std::string`, and callback-scoped `std::string_view`. Invalid types,
-duplicate registration, and C++ exceptions are reported as Luau runtime
-errors or registration exceptions. Userdata destruction follows Luau garbage
-collection and State teardown.
+mutable or read-only data-member properties, and member functions including
+explicitly grouped overloads. Constructor and member arguments/results support
+booleans, numeric scalars, enums, `std::string`, and callback-scoped
+`std::string_view`. Invalid types, duplicate registration, and C++ exceptions
+are reported as Luau runtime errors or registration exceptions. Userdata
+destruction follows Luau garbage collection and State teardown.
 
 Properties may also use a no-argument member getter and an optional
 one-argument void setter:
@@ -527,8 +527,24 @@ exactly one matching candidate; no match or an ambiguous match is reported as
 a runtime error. Integer and floating-point arguments both accept Luau
 numbers, so overlapping numeric overloads can be ambiguous.
 
-Borrowed/shared userdata, actor transfers, enums, flags, and library
-registration are not part of this first binding slice.
+Enums and flags can be registered as immutable tables of integer constants:
+
+```cpp
+state.new_enum<PlayerState>(
+    "PlayerState",
+    {{"Idle", PlayerState::Idle}, {"Running", PlayerState::Running}});
+state.new_flags<RenderFlag>(
+    "RenderFlags",
+    {{"Visible", RenderFlag::Visible}, {"CastShadow", RenderFlag::CastShadow}});
+```
+
+The resulting `PlayerState.Idle` and `RenderFlags.Visible` values cross
+user-function bindings as their enum's underlying integer. Flags are exposed
+as constants; applications should define and validate any domain-specific
+combinations they require.
+
+Borrowed/shared userdata, actor transfers, and library registration are not
+part of this first binding slice.
 
 ---
 
@@ -612,46 +628,40 @@ property(
 
 # 17. Overloads
 
-The wrapper supports overloaded C++ functions:
+Member overloads are grouped explicitly and exposed through a usertype:
 
 ```cpp
-lua["Create"] =
-    overload(
-        [](int value) { ... },
-        [](float value) { ... },
-        [](std::string_view value) { ... }
-    );
+state.new_usertype<Player>(
+    "Player",
+    method("SetValue",
+           overload(static_cast<void (Player::*)(int)>(&Player::SetValue),
+                    static_cast<void (Player::*)(std::string_view)>(
+                        &Player::SetValue))));
 ```
 
-The wrapper performs the appropriate argument dispatch.
+Overloaded member-function pointers must be disambiguated with `static_cast`.
+The wrapper dispatches by argument count and supported argument types. Calls
+with no matching candidate or multiple matching candidates fail explicitly.
 
 ---
 
 # 18. Enums
 
-Runtime enum support:
+The host registers C++ enums and flags as immutable Luau tables:
 
-```lua
-local PlayerState = enum.new("PlayerState", {
-    Idle = 0,
-    Running = 1,
-    Jumping = 2,
-    Dead = 3,
-})
+```cpp
+state.new_enum<PlayerState>(
+    "PlayerState",
+    {{"Idle", PlayerState::Idle}, {"Running", PlayerState::Running}});
+state.new_flags<RenderFlag>(
+    "RenderFlags",
+    {{"Visible", RenderFlag::Visible}, {"CastShadow", RenderFlag::CastShadow}});
 ```
 
-Flags:
-
-```lua
-local RenderFlags = enum.flags("RenderFlags", {
-    Visible = 1 << 0,
-    CastShadow = 1 << 1,
-})
-```
-
-Runtime enum values should preferably be immutable.
-
-Enums are a wrapper/library feature. No changes to the Luau parser or language are required.
+Scripts access the named integer constants as `PlayerState.Idle` or
+`RenderFlags.Visible`. Bound C++ functions accept and return enum values using
+their underlying integer representation. Flags provide named constants; any
+combination rules remain the host application's responsibility.
 
 ---
 
@@ -2235,8 +2245,9 @@ boundary, successful calls, and error paths.
 - Add the library registration system.
 
 The first local-userdata slice is implemented: owned usertypes, constructor
-and method overload dispatch, data-member and getter/setter properties.
-Borrowed/shared ownership, enums/flags, and library registration remain open.
+and method overload dispatch, data-member and getter/setter properties, and
+immutable enum/flag tables. Borrowed/shared ownership, actor transfers, and
+library registration remain open.
 
 **Exit criteria:** lifetime, invalid-type, ownership, and repeated-registration
 behavior is documented and tested.

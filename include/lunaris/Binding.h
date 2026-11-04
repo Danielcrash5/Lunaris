@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <new>
 #include <stdexcept>
@@ -17,6 +18,7 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -176,6 +178,8 @@ template <typename T>
     using U = std::remove_cvref_t<T>;
     if constexpr (std::same_as<U, bool>) {
         return lua_type(state, index) == LUA_TBOOLEAN;
+    } else if constexpr (std::is_enum_v<U>) {
+        return argument_matches<std::underlying_type_t<U>>(state, index);
     } else if constexpr (std::integral<U>) {
         std::int64_t value = 0;
         if (lua_type(state, index) == LUA_TINTEGER) {
@@ -303,6 +307,9 @@ template <typename T>
             throw std::invalid_argument("expected a boolean argument");
         }
         return lua_toboolean(state, index) != 0;
+    } else if constexpr (std::is_enum_v<U>) {
+        using Underlying = std::underlying_type_t<U>;
+        return static_cast<U>(read_argument<Underlying>(state, index));
     } else if constexpr (std::integral<U>) {
         std::int64_t value = 0;
         if (lua_type(state, index) == LUA_TINTEGER) {
@@ -383,6 +390,12 @@ int push_value(lua_State *state, T value) {
     return 1;
 }
 
+template <typename T>
+    requires std::is_enum_v<T>
+int push_value(lua_State *state, T value) {
+    return push_value(state, static_cast<std::underlying_type_t<T>>(value));
+}
+
 template <std::floating_point T> int push_value(lua_State *state, T value) {
     lua_pushnumber(state, static_cast<double>(value));
     return 1;
@@ -395,6 +408,57 @@ inline int push_value(lua_State *state, std::string_view value) {
 
 inline int push_value(lua_State *state, const std::string &value) {
     return push_value(state, std::string_view(value));
+}
+
+template <typename Enum>
+void register_named_values(
+    lua_State *state, std::string_view tableName,
+    std::initializer_list<std::pair<std::string_view, Enum>> entries) {
+    static_assert(std::is_enum_v<Enum>,
+                  "named Luau values must use a C++ enum type");
+    if (tableName.empty() || tableName.find('\0') != std::string_view::npos) {
+        throw std::invalid_argument(
+            "enum or flags name must be non-empty and contain no null byte");
+    }
+
+    std::unordered_set<std::string> names;
+    for (const auto &[name, value] : entries) {
+        (void)value;
+        if (name.empty() || name.find('\0') != std::string_view::npos) {
+            throw std::invalid_argument(
+                "enum or flag member names must be non-empty and contain no "
+                "null byte");
+        }
+        if (!names.emplace(name).second) {
+            throw std::invalid_argument("duplicate enum or flag member '" +
+                                        std::string(name) + "'");
+        }
+    }
+
+    const std::string globalName(tableName);
+    lua_getglobal(state, globalName.c_str());
+    const bool globalExists = !lua_isnil(state, -1);
+    lua_pop(state, 1);
+    if (globalExists) {
+        throw std::invalid_argument("global '" + globalName +
+                                    "' is already registered");
+    }
+
+    lua_createtable(state, 0, static_cast<int>(entries.size()));
+    for (const auto &[name, value] : entries) {
+        using Underlying = std::underlying_type_t<Enum>;
+        const Underlying numeric = static_cast<Underlying>(value);
+        if (!std::in_range<std::int64_t>(numeric)) {
+            lua_pop(state, 1);
+            throw std::out_of_range("enum or flag value exceeds Luau integer "
+                                    "range");
+        }
+        lua_pushinteger64(state, static_cast<std::int64_t>(numeric));
+        const std::string key(name);
+        lua_setfield(state, -2, key.c_str());
+    }
+    lua_setreadonly(state, -1, true);
+    lua_setglobal(state, globalName.c_str());
 }
 
 template <typename T> int push_return(lua_State *state, T &&value) {
