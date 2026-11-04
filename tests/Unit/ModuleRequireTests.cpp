@@ -135,6 +135,83 @@ TEST(ModuleRequireTests, DetectsCyclesAndDoesNotCacheFailures) {
     EXPECT_EQ(std::get<double>(retry.value()[0]), 42.0);
 }
 
+TEST(ModuleRequireTests, InvalidatesCachedDependentsTransitively) {
+    auto provider = std::make_shared<SourceProvider>();
+    provider->sources.emplace(
+        "Parent", lunaris::ModuleSource{"game:Parent", "game://Parent.luau",
+                                        "return require('Child') + 10"});
+    provider->sources.emplace(
+        "Child",
+        lunaris::ModuleSource{"game:Child", "game://Child.luau", "return 1"});
+    auto loader = std::make_shared<lunaris::ModuleLoader>(provider);
+    lunaris::State state;
+    state.set_module_loader(loader);
+    auto script = state.load_script("return require('Parent')", "parent.luau");
+    ASSERT_TRUE(script);
+
+    auto first = script.value().execute();
+    ASSERT_TRUE(first) << first.error().message();
+    ASSERT_EQ(first.value().size(), 1U);
+    EXPECT_EQ(std::get<double>(first.value()[0]), 11.0);
+
+    provider->sources["Child"].source = "return 2";
+    auto invalidated = state.invalidate_module("Child");
+    ASSERT_TRUE(invalidated) << invalidated.error().message();
+
+    auto second = script.value().execute();
+    ASSERT_TRUE(second) << second.error().message();
+    ASSERT_EQ(second.value().size(), 1U);
+    EXPECT_EQ(std::get<double>(second.value()[0]), 12.0);
+}
+
+TEST(ModuleRequireTests, ReloadsRequestedModuleImmediately) {
+    auto provider = std::make_shared<SourceProvider>();
+    provider->sources.emplace(
+        "Value",
+        lunaris::ModuleSource{"game:Value", "game://Value.luau", "return 1"});
+    auto loader = std::make_shared<lunaris::ModuleLoader>(provider);
+    lunaris::State state;
+    state.set_module_loader(loader);
+    auto script = state.load_script("return require('Value')", "value.luau");
+    ASSERT_TRUE(script);
+
+    auto first = script.value().execute();
+    ASSERT_TRUE(first) << first.error().message();
+    ASSERT_EQ(first.value().size(), 1U);
+    EXPECT_EQ(std::get<double>(first.value()[0]), 1.0);
+
+    provider->sources["Value"].source = "return 2";
+    auto reloaded = state.reload_module("Value");
+    ASSERT_TRUE(reloaded) << reloaded.error().message();
+
+    auto second = script.value().execute();
+    ASSERT_TRUE(second) << second.error().message();
+    ASSERT_EQ(second.value().size(), 1U);
+    EXPECT_EQ(std::get<double>(second.value()[0]), 2.0);
+}
+
+TEST(ModuleRequireTests, FailedReloadDoesNotKeepTheOldCachedValue) {
+    auto provider = std::make_shared<SourceProvider>();
+    provider->sources.emplace(
+        "Value",
+        lunaris::ModuleSource{"game:Value", "game://Value.luau", "return 1"});
+    lunaris::State state;
+    state.set_module_loader(std::make_shared<lunaris::ModuleLoader>(provider));
+    auto script = state.load_script("return require('Value')", "value.luau");
+    ASSERT_TRUE(script);
+
+    auto first = script.value().execute();
+    ASSERT_TRUE(first) << first.error().message();
+
+    provider->sources["Value"].source = "local =";
+    auto reloaded = state.reload_module("Value");
+    ASSERT_FALSE(reloaded);
+    EXPECT_EQ(reloaded.error().type(), lunaris::ErrorType::Module);
+
+    auto retry = script.value().execute();
+    ASSERT_FALSE(retry);
+}
+
 TEST(ModuleRequireTests, DisablingLoaderRemovesRequireAndClearsModuleCache) {
     auto provider = std::make_shared<SourceProvider>();
     provider->sources.emplace(

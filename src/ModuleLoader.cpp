@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -34,6 +35,36 @@ void clear_module_cache(lua_State *state, detail::StateLifetime &lifetime) {
     lifetime.moduleCache.clear();
 }
 
+class LoadingModuleGuard {
+  public:
+    LoadingModuleGuard(detail::StateLifetime &lifetime,
+                       std::string_view canonicalId)
+        : m_lifetime(lifetime) {
+        m_lifetime.loadingModules.emplace_back(canonicalId);
+    }
+
+    ~LoadingModuleGuard() {
+        if (!m_lifetime.loadingModules.empty()) {
+            m_lifetime.loadingModules.pop_back();
+        }
+    }
+
+    LoadingModuleGuard(const LoadingModuleGuard &) = delete;
+    LoadingModuleGuard &operator=(const LoadingModuleGuard &) = delete;
+
+  private:
+    detail::StateLifetime &m_lifetime;
+};
+
+void record_dependency(detail::StateLifetime &lifetime,
+                       std::string_view parentId,
+                       const std::string &dependencyId) {
+    const auto parent = lifetime.moduleCache.find(std::string(parentId));
+    if (parent != lifetime.moduleCache.end() && parent->second.loading) {
+        parent->second.dependencies.insert(dependencyId);
+    }
+}
+
 int require_module_impl(lua_State *state, detail::StateLifetime &lifetime,
                         std::string_view name, std::string &error) {
     const int initialTop = lua_gettop(state);
@@ -52,6 +83,10 @@ int require_module_impl(lua_State *state, detail::StateLifetime &lifetime,
                     module.canonicalId + "'";
             lua_settop(state, initialTop);
             return 0;
+        }
+        if (!lifetime.loadingModules.empty()) {
+            record_dependency(lifetime, lifetime.loadingModules.back(),
+                              module.canonicalId);
         }
         lua_getref(state, cached->second.reference);
         return 1;
@@ -91,9 +126,10 @@ int require_module_impl(lua_State *state, detail::StateLifetime &lifetime,
         return 0;
     }
 
+    LoadingModuleGuard loading(lifetime, module.canonicalId);
     lifetime.moduleCache.emplace(
         module.canonicalId,
-        detail::StateLifetime::ModuleCacheEntry{LUA_NOREF, true});
+        detail::StateLifetime::ModuleCacheEntry{LUA_NOREF, true, {}});
     const int status = lua_pcall(state, 0, LUA_MULTRET, 0);
     if (status != LUA_OK) {
         std::size_t length = 0;
@@ -112,12 +148,84 @@ int require_module_impl(lua_State *state, detail::StateLifetime &lifetime,
         lua_pushvalue(state, initialTop + 2);
     }
     const int reference = lua_ref(state, -1);
-    lifetime.moduleCache.insert_or_assign(
-        module.canonicalId,
-        detail::StateLifetime::ModuleCacheEntry{reference, false});
+    const auto cacheEntry = lifetime.moduleCache.find(module.canonicalId);
+    if (cacheEntry == lifetime.moduleCache.end()) {
+        error = "module loader changed while module '" + module.canonicalId +
+                "' was loading";
+        lua_unref(state, reference);
+        lua_settop(state, initialTop);
+        return 0;
+    }
+    cacheEntry->second.reference = reference;
+    cacheEntry->second.loading = false;
+    if (lifetime.loadingModules.size() > 1) {
+        record_dependency(
+            lifetime,
+            lifetime.loadingModules[lifetime.loadingModules.size() - 2],
+            module.canonicalId);
+    }
     lua_settop(state, initialTop);
     lua_getref(state, reference);
     return 1;
+}
+
+Result<void> invalidate_module_cache(detail::StateLifetime &lifetime,
+                                     std::string_view name) {
+    if (!lifetime.moduleLoader) {
+        return Result<void>::failure(
+            module_error("module loader is not available"));
+    }
+    if (name.find('\0') != std::string_view::npos) {
+        return Result<void>::failure(
+            module_error("module name contains a null byte"));
+    }
+
+    auto resolved = lifetime.moduleLoader->resolve(name);
+    if (!resolved) {
+        return Result<void>::failure(resolved.error());
+    }
+
+    std::unordered_set<std::string> invalidated;
+    invalidated.insert(resolved.value().canonicalId);
+    bool foundDependent = true;
+    while (foundDependent) {
+        foundDependent = false;
+        for (const auto &[canonicalId, entry] : lifetime.moduleCache) {
+            if (invalidated.contains(canonicalId)) {
+                continue;
+            }
+            if (std::any_of(entry.dependencies.begin(),
+                            entry.dependencies.end(),
+                            [&invalidated](const std::string &dependency) {
+                                return invalidated.contains(dependency);
+                            })) {
+                invalidated.insert(canonicalId);
+                foundDependent = true;
+            }
+        }
+    }
+
+    for (const std::string &canonicalId : invalidated) {
+        const auto entry = lifetime.moduleCache.find(canonicalId);
+        if (entry != lifetime.moduleCache.end() && entry->second.loading) {
+            return Result<void>::failure(
+                module_error("cannot invalidate module '" + canonicalId +
+                             "' while it is loading"));
+        }
+    }
+
+    for (const std::string &canonicalId : invalidated) {
+        const auto entry = lifetime.moduleCache.find(canonicalId);
+        if (entry == lifetime.moduleCache.end()) {
+            continue;
+        }
+        if (entry->second.reference != LUA_NOREF &&
+            entry->second.reference != LUA_REFNIL) {
+            lua_unref(lifetime.state, entry->second.reference);
+        }
+        lifetime.moduleCache.erase(entry);
+    }
+    return Result<void>::success();
 }
 
 int require_module(lua_State *state) {
@@ -169,6 +277,32 @@ int require_module(lua_State *state) {
 }
 
 } // namespace
+
+Result<void> detail::invalidate_module(StateLifetime &lifetime,
+                                       std::string_view name) {
+    return invalidate_module_cache(lifetime, name);
+}
+
+Result<void> detail::reload_module(StateLifetime &lifetime,
+                                   std::string_view name) {
+    auto invalidated = invalidate_module_cache(lifetime, name);
+    if (!invalidated) {
+        return invalidated;
+    }
+
+    const int initialTop = lua_gettop(lifetime.state);
+    std::string error;
+    try {
+        (void)require_module_impl(lifetime.state, lifetime, name, error);
+    } catch (const std::exception &exception) {
+        error = exception.what();
+    }
+    lua_settop(lifetime.state, initialTop);
+    if (!error.empty()) {
+        return Result<void>::failure(module_error(std::move(error)));
+    }
+    return Result<void>::success();
+}
 
 ModuleLoader::ModuleLoader(std::shared_ptr<ModuleProvider> provider,
                            ModuleLoaderConfig config)

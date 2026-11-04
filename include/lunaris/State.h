@@ -124,6 +124,17 @@ class State {
     /// Passing nullptr disables module loading and clears cached modules.
     void set_module_loader(std::shared_ptr<ModuleLoader> moduleLoader);
 
+    /// Invalidates a module and all cached modules that depend on it.
+    /// Invalidated modules are loaded again on their next require(...).
+    /// @return Success, or a Module error if resolution fails or a target is
+    /// currently loading.
+    [[nodiscard]] Result<void> invalidate_module(std::string_view name);
+
+    /// Invalidates a module and its dependents, then immediately reloads it.
+    /// Dependent modules are reloaded lazily on their next require(...).
+    /// @return Success, or a Module error if resolution or execution fails.
+    [[nodiscard]] Result<void> reload_module(std::string_view name);
+
     /// Pushes an integer onto the Luau stack.
     template <std::integral T>
         requires(!std::same_as<std::remove_cv_t<T>, bool>)

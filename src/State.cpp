@@ -250,6 +250,16 @@ void State::set_module_loader(std::shared_ptr<ModuleLoader> moduleLoader) {
     detail::install_module_loader(state, m_lifetime, std::move(moduleLoader));
 }
 
+Result<void> State::invalidate_module(std::string_view name) {
+    (void)checked_state();
+    return detail::invalidate_module(*m_lifetime, name);
+}
+
+Result<void> State::reload_module(std::string_view name) {
+    (void)checked_state();
+    return detail::reload_module(*m_lifetime, name);
+}
+
 Result<Script> State::load_script(std::string_view source,
                                   std::string_view chunkName) {
     (void)checked_state();

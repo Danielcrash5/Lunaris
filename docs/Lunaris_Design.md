@@ -1012,8 +1012,12 @@ Modules compile and execute on first require, then cache the first returned
 value by canonical ID; a module with no return value caches `true`. A recursive
 require of a module that is currently loading reports a cycle error. Failed
 modules are not cached, so a later require can retry. Replacing or disabling
-the loader clears the State's module cache. This initial runtime implementation
-does not yet record dependency edges or expose explicit invalidation/reload.
+the loader clears the State's module cache. Successful nested requires record
+dependency edges. `State::invalidate_module(name)` clears the named module and
+all cached transitive dependents; they are reloaded on their next require.
+`State::reload_module(name)` performs the same invalidation and immediately
+loads the named module again. Existing Luau values that were already returned
+by `require` are not rewritten.
 
 ## 27.2 Optional LuaRocks Integration
 
@@ -1048,19 +1052,24 @@ rocks are discoverable and loadable.
 
 # 28. Module Hot Reload
 
-Modules can be invalidated:
+Modules can be invalidated or reloaded through `State`:
 
 ```cpp
-lua.modules().invalidate("Player");
+state.invalidate_module("Player");
 ```
 
-or reloaded:
+Invalidation clears the module and all cached transitive dependents. The
+cleared modules execute again on their next `require`.
 
 ```cpp
-lua.modules().reload("Player");
+state.reload_module("Player");
 ```
 
-The Module Loader can maintain a dependency graph:
+Reload also immediately executes the requested module, while invalidated
+dependents remain lazy. Existing values previously returned from `require`
+remain unchanged.
+
+The State maintains a dependency graph:
 
 ```text
 Game
@@ -1072,7 +1081,8 @@ Game
     └── Item
 ```
 
-Dependency tracking belongs to the Module Loader, not the Bytecode Cache.
+Dependency tracking belongs to the State's module cache, not the Bytecode
+Cache.
 
 ---
 
@@ -2234,9 +2244,9 @@ behavior are covered without leaking or corrupting environments.
 **Exit criteria:** tests cover provider resolution, paths, catalog behavior,
 cache behavior, cycles/failures, dependency invalidation, and reload.
 
-The provider/root/catalog resolution slice is implemented and tested. Luau
-`require`, module execution/caching, dependency tracking, and reload remain
-open.
+The provider/root/catalog resolution slice, Luau `require`, module
+execution/caching, dependency tracking, transitive invalidation, and reload
+are implemented and tested.
 
 ## Phase 7: Optional LuaRocks and Native Modules
 
