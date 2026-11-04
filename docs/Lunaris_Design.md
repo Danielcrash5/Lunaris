@@ -643,7 +643,8 @@ enum class ErrorType
     Load,
     Runtime,
     Type,
-    Memory
+    Memory,
+    Cache
 };
 ```
 
@@ -727,8 +728,7 @@ Compile, load, and runtime failures are returned as structured errors. Script
 execution restores the State stack and currently converts scalar return values
 only. Bytecode blobs can be reconstructed from owned binary data; bytecode
 version headers are checked before loading, while complete bytecode validation
-is performed by Luau's loader. Public compiler options and bytecode caching
-remain future work.
+is performed by Luau's loader. Public compiler options remain future work.
 
 The exact bytecode representation follows the Luau version used by the repository.
 
@@ -736,59 +736,19 @@ The exact bytecode representation follows the Luau version used by the repositor
 
 # 21. Bytecode Cache
 
-The wrapper provides a generic bytecode cache.
+`BytecodeCache::compile` checks caller-provided storage before compiling. Its
+key includes a stable source hash, source length, compiler cache version, and
+Luau target bytecode/type versions. Cache entries also retain the full source
+and version metadata, so hash collisions or stale entries cannot return
+bytecode for different source. The compiler cache version must be incremented
+when Luau compiler behavior or compiler options change without a bytecode
+version change.
+
+Storage is pluggable and does not require a physical filesystem:
 
 ```cpp
-struct BytecodeCacheKey
-{
-    uint64_t sourceHash;
-    uint64_t compilerVersion;
-    uint64_t bytecodeVersion;
-};
-```
-
-An entry can contain:
-
-```cpp
-struct BytecodeCacheEntry
-{
-    Bytecode bytecode;
-
-    uint64_t sourceHash;
-    uint64_t compilerVersion;
-    uint64_t bytecodeVersion;
-
-    std::string sourceIdentifier;
-};
-```
-
-Source hashes are preferred over timestamps as the primary cache validation mechanism.
-
-The cache must account for the compiler and bytecode version.
-
----
-
-# 22. Bytecode Cache Storage
-
-The cache should not require a physical filesystem.
-
-```cpp
-class BytecodeCacheStorage
-{
-public:
-    virtual ~BytecodeCacheStorage() = default;
-
-    virtual bool load(
-        std::string_view key,
-        Bytecode& output) = 0;
-
-    virtual void store(
-        std::string_view key,
-        const Bytecode& bytecode) = 0;
-
-    virtual void remove(
-        std::string_view key) = 0;
-};
+class BytecodeCacheStorage;
+auto result = BytecodeCache::compile(source, sourceIdentifier, storage);
 ```
 
 Possible implementations:
@@ -801,6 +761,23 @@ AssetPackCache
 ```
 
 Axiom can implement its own storage using its VFS.
+
+Storage failures are returned as `ErrorType::Cache`; compilation failures are
+not cached. Entries whose source or version metadata does not match the key are
+removed and rebuilt.
+
+---
+
+# 22. Bytecode Cache Storage
+
+Implement `BytecodeCacheStorage` to connect the cache to memory, files, a VFS,
+or an asset pack. `load` returns an empty optional for a cache miss; storage
+failures are returned as `Result` errors. `store` replaces an entry and
+`remove` succeeds when the key is already absent.
+
+The storage owns persistence and serialization. Persistent implementations
+should serialize the bytecode bytes and entry metadata, then reconstruct
+bytecode through `Bytecode::from_bytes` when loading.
 
 ---
 

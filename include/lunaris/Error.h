@@ -6,7 +6,7 @@
 namespace lunaris {
 
 /// Category of a structured Lunaris or Luau operation error.
-enum class ErrorType { Compile, Load, Runtime, Type, Memory };
+enum class ErrorType { Compile, Load, Runtime, Type, Memory, Cache };
 
 /// Structured error information returned by fallible Lunaris operations.
 class Error {

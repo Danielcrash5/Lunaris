@@ -21,6 +21,7 @@ add_subdirectory(thirdparty/luau EXCLUDE_FROM_ALL)
 
 add_library(lunaris
     src/Bytecode.cpp
+    src/BytecodeCache.cpp
     src/Error.cpp
     src/Script.cpp
     src/State.cpp
