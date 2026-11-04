@@ -242,3 +242,26 @@ TEST(BytecodeCacheTests, StateLoadScriptSurfacesCacheFailures) {
     EXPECT_EQ(result.error().type(), lunaris::ErrorType::Cache);
     EXPECT_EQ(result.error().message(), "storage unavailable");
 }
+
+TEST(BytecodeCacheTests, ScriptReloadUsesStateCacheAndCompilerOptions) {
+    auto storage = std::make_shared<MemoryBytecodeCache>();
+    lunaris::State state;
+    state.set_bytecode_cache_storage(storage);
+    lunaris::CompilerOptions options;
+    options.debugLevel = 2;
+    state.set_compiler_options(options);
+
+    auto loaded = state.load_script("return 1", "reload-cache.luau");
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(storage->storeCount, 1);
+    auto firstReload = loaded.value().reload("return 2");
+    ASSERT_TRUE(firstReload) << firstReload.error().message();
+    ASSERT_EQ(storage->storeCount, 2);
+
+    auto secondReload = loaded.value().reload("return 2");
+    ASSERT_TRUE(secondReload) << secondReload.error().message();
+    EXPECT_EQ(storage->loadCount, 3);
+    EXPECT_EQ(storage->storeCount, 2);
+    ASSERT_EQ(secondReload.value().size(), 1U);
+    EXPECT_EQ(std::get<double>(secondReload.value()[0]), 2.0);
+}

@@ -907,8 +907,9 @@ All scripts are hot-reloadable, including scripts that are not modules.
 source in a fresh environment by default. `ReloadMode::PreserveEnvironment`
 uses the current environment during the replacement execution. Reload commits
 the replacement compiled chunk only after compilation, loading, execution, and
-scalar result conversion succeed. Compile, load, runtime, or result-conversion
-failures leave the previous chunk available.
+scalar result conversion succeed. It uses the State's configured compiler
+options and optional bytecode cache. Compile, load, runtime, cache, or result-
+conversion failures leave the previous chunk available.
 
 Reset mode also retains the old environment if the replacement fails. In
 PreserveEnvironment mode, side effects performed before a runtime failure
@@ -2326,6 +2327,10 @@ are covered by tests.
 
 **Exit criteria:** scripts can execute independently; reload and failure
 behavior are covered without leaking or corrupting environments.
+
+Standalone script isolation, scalar environment access, Reset and
+PreserveEnvironment reload, and transactional replacement on failures are
+implemented and tested.
 
 ## Phase 6: Module Loader
 

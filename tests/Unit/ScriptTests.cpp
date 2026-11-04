@@ -215,6 +215,40 @@ TEST(ScriptTests, FailedReloadRetainsPreviouslyLoadedChunk) {
     EXPECT_EQ(state.top(), 0);
 }
 
+TEST(ScriptTests, FailedResetReloadKeepsThePreviousEnvironment) {
+    lunaris::State state;
+    auto loaded = state.load_script("value = 7; return value", "reload.luau");
+    ASSERT_TRUE(loaded);
+    lunaris::Script &script = loaded.value();
+    ASSERT_TRUE(script.execute());
+
+    auto failed = script.reload("value = 99; error('replacement failed')");
+
+    ASSERT_FALSE(failed);
+    EXPECT_EQ(failed.error().type(), lunaris::ErrorType::Runtime);
+    auto value = script.get_global("value");
+    ASSERT_TRUE(value);
+    EXPECT_EQ(std::get<double>(value.value()), 7.0);
+    auto oldChunk = script.execute();
+    ASSERT_TRUE(oldChunk) << oldChunk.error().message();
+    EXPECT_EQ(std::get<double>(oldChunk.value()[0]), 7.0);
+}
+
+TEST(ScriptTests, RejectsInvalidReloadModesWithoutReplacingTheChunk) {
+    lunaris::State state;
+    auto loaded = state.load_script("return 17", "reload-mode.luau");
+    ASSERT_TRUE(loaded);
+
+    auto result = loaded.value().reload("return 99",
+                                        static_cast<lunaris::ReloadMode>(-1));
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().type(), lunaris::ErrorType::Type);
+    auto existing = loaded.value().execute();
+    ASSERT_TRUE(existing);
+    EXPECT_EQ(std::get<double>(existing.value()[0]), 17.0);
+}
+
 TEST(ScriptTests, RejectsChunkNamesContainingEmbeddedNull) {
     lunaris::State state;
     const std::string chunkName("script\0name", 11);

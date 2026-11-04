@@ -1,5 +1,6 @@
 #include "lunaris/Script.h"
 
+#include "lunaris/BytecodeCache.h"
 #include "lunaris/State.h"
 
 #include <lua.h>
@@ -303,7 +304,18 @@ Result<void> Script::set_global(std::string_view name, const Value &value) {
 Result<std::vector<Value>> Script::reload(std::string_view source,
                                           ReloadMode mode) {
     lua_State *state = checked_state(m_lifetime, m_reference);
-    auto bytecode = Bytecode::compile(source, m_source);
+    const auto lifetime = m_lifetime.lock();
+    if (mode != ReloadMode::Reset && mode != ReloadMode::PreserveEnvironment) {
+        return Result<std::vector<Value>>::failure(
+            Error(ErrorType::Type, "invalid script reload mode", m_source));
+    }
+
+    auto bytecode =
+        lifetime->bytecodeCacheStorage
+            ? BytecodeCache::compile(source, m_source,
+                                     *lifetime->bytecodeCacheStorage,
+                                     lifetime->compilerOptions)
+            : Bytecode::compile(source, m_source, lifetime->compilerOptions);
     if (!bytecode) {
         return Result<std::vector<Value>>::failure(bytecode.error());
     }
