@@ -14,6 +14,9 @@ namespace lunaris {
 
 class State;
 
+/// Policy for handling a script's private environment during reload.
+enum class ReloadMode { Reset, PreserveEnvironment };
+
 /// Compiled source chunk owned by a State.
 class Script {
   public:
@@ -48,6 +51,14 @@ class Script {
     /// @return Success, or a Type error if the name contains a null byte.
     [[nodiscard]] Result<void> set_global(std::string_view name,
                                           const Value &value);
+
+    /// Compiles and executes replacement source, committing the new chunk only
+    /// after successful execution.
+    /// Reset starts with a fresh environment; PreserveEnvironment reuses the
+    /// existing one. Compile/runtime/type failures retain the previous chunk.
+    /// Runtime side effects are not rolled back.
+    [[nodiscard]] Result<std::vector<Value>>
+    reload(std::string_view source, ReloadMode mode = ReloadMode::Reset);
 
   private:
     friend class State;

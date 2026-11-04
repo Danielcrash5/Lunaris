@@ -160,6 +160,61 @@ TEST(ScriptTests, ScriptGlobalAccessRejectsInvalidNamesAndReferences) {
     EXPECT_EQ(state.top(), 0);
 }
 
+TEST(ScriptTests, ReloadResetsEnvironmentByDefault) {
+    lunaris::State state;
+    ASSERT_TRUE(state.set_global("counter", lunaris::Value{10.0}));
+    auto loaded =
+        state.load_script("counter = 50; return counter", "reload.luau");
+    ASSERT_TRUE(loaded);
+    lunaris::Script &script = loaded.value();
+    ASSERT_TRUE(script.execute());
+    ASSERT_EQ(std::get<double>(script.get_global("counter").value()), 50.0);
+
+    auto reloaded = script.reload("counter = counter + 1; return counter");
+
+    ASSERT_TRUE(reloaded) << reloaded.error().message();
+    EXPECT_EQ(std::get<double>(reloaded.value()[0]), 11.0);
+    EXPECT_EQ(std::get<double>(script.get_global("counter").value()), 11.0);
+    EXPECT_EQ(std::get<double>(state.get_global("counter").value()), 10.0);
+}
+
+TEST(ScriptTests, ReloadCanPreserveEnvironment) {
+    lunaris::State state;
+    auto loaded = state.load_script("value = 4; return value", "reload.luau");
+    ASSERT_TRUE(loaded);
+    lunaris::Script &script = loaded.value();
+    ASSERT_TRUE(script.execute());
+
+    auto reloaded = script.reload("value = value + 1; return value",
+                                  lunaris::ReloadMode::PreserveEnvironment);
+    ASSERT_TRUE(reloaded) << reloaded.error().message();
+    EXPECT_EQ(std::get<double>(reloaded.value()[0]), 5.0);
+
+    auto executedAgain = script.execute();
+    ASSERT_TRUE(executedAgain);
+    EXPECT_EQ(std::get<double>(executedAgain.value()[0]), 6.0);
+}
+
+TEST(ScriptTests, FailedReloadRetainsPreviouslyLoadedChunk) {
+    lunaris::State state;
+    auto loaded = state.load_script("return 17", "reload-failure.luau");
+    ASSERT_TRUE(loaded);
+    lunaris::Script &script = loaded.value();
+
+    auto compileFailure = script.reload("local = ");
+    ASSERT_FALSE(compileFailure);
+    EXPECT_EQ(compileFailure.error().type(), lunaris::ErrorType::Compile);
+    auto runtimeFailure = script.reload("error('reload failed')");
+    ASSERT_FALSE(runtimeFailure);
+    EXPECT_EQ(runtimeFailure.error().type(), lunaris::ErrorType::Runtime);
+
+    auto existing = script.execute();
+    ASSERT_TRUE(existing);
+    ASSERT_EQ(existing.value().size(), 1U);
+    EXPECT_EQ(std::get<double>(existing.value()[0]), 17.0);
+    EXPECT_EQ(state.top(), 0);
+}
+
 TEST(ScriptTests, RejectsChunkNamesContainingEmbeddedNull) {
     lunaris::State state;
     const std::string chunkName("script\0name", 11);

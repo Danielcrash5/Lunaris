@@ -817,25 +817,17 @@ State
 
 All scripts are hot-reloadable, including scripts that are not modules.
 
-Example:
+`Script::reload(source, ReloadMode::Reset)` compiles and executes replacement
+source in a fresh environment by default. `ReloadMode::PreserveEnvironment`
+uses the current environment during the replacement execution. Reload commits
+the replacement compiled chunk only after compilation, loading, execution, and
+scalar result conversion succeed. Compile, load, runtime, or result-conversion
+failures leave the previous chunk available.
 
-```cpp
-auto script =
-    lua.load_script(
-        "Player",
-        source
-    );
-
-auto result =
-    script.execute();
-```
-
-Later:
-
-```cpp
-auto result =
-    script.reload(newSource);
-```
+Reset mode also retains the old environment if the replacement fails. In
+PreserveEnvironment mode, side effects performed before a runtime failure
+cannot be rolled back. Hot reload does not migrate arbitrary Lua state or
+rewrite closures that still reference old upvalues.
 
 Conceptually:
 
@@ -910,9 +902,10 @@ Destroy the old environment and create a new one.
 
 Reuse the environment while executing the new chunk.
 
-### PreserveGlobals
+### PreserveGlobals (future)
 
-Explicitly preserve selected globals.
+Selective global migration is not implemented. It requires a separate explicit
+selection API rather than implicit copying of arbitrary Lua state.
 
 The wrapper should not try to magically migrate arbitrary Lua state.
 
