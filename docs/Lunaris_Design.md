@@ -393,24 +393,19 @@ API accepts null-terminated names.
 
 # 11. Functions
 
-C++ functions can be exposed directly.
-
-Example:
+C++ callables are exposed by assigning them to a global through `operator[]`
+(Chapter 12.2) or by registering them in a `Library` (Chapter 34). Both use the
+same binding mechanism.
 
 ```cpp
 int Add(int a, int b)
 {
     return a + b;
 }
-```
 
-Lunaris:
-
-```cpp
-lua["Add"] = [](int a, int b)
-{
-    return a + b;
-};
+lua["Add"] = Add;                                                // function name
+lua["Mul"] = [](int a, int b) { return a * b; };                 // lambda
+lua["Scale"] = [factor = 2.0](double v) { return v * factor; };  // capturing lambda
 ```
 
 Luau:
@@ -419,13 +414,42 @@ Luau:
 local result = Add(10, 20)
 ```
 
-The wrapper handles:
+Supported callables: function pointers and function names, lambdas (capturing
+or not), `std::function`, and functor objects with exactly one non-template
+`operator()`. The parameter and return types are deduced from the callable.
+The following are rejected at compile time with a descriptive `static_assert`:
 
-- argument conversion
-- type checking
-- return value conversion
-- stack management
-- error propagation
+- generic lambdas and templated functors (parameter types cannot be deduced),
+- overloaded function names (the overload cannot be deduced),
+- member function pointers (they need an object; use usertypes, Chapter 13).
+
+Overloaded names are resolved explicitly:
+
+```cpp
+lua["Abs"]    = lunaris::resolve<int(int)>(std::abs);        // pick one overload
+lua["Length"] = lunaris::overloads(&Length2D, &Length3D);   // dispatch by argument types (Chapter 17)
+```
+
+Rules:
+
+- Arguments are converted with the same rules as usertype methods
+  (Chapters 13 and 17). A wrong argument count or type raises a Luau error.
+- Return types: `void`, scalars, strings and enums. A `std::tuple` of those
+  returns several values. A `Result<T>` return converts a failure into a Luau
+  error carrying the `Error` message.
+- Parameter types `Value`, `Table`, `Function` and `std::optional<T>` (optional
+  trailing arguments) are supported once Phase 2 provides the handles. A
+  `Function` parameter is how Luau callbacks are passed to C++.
+- Exceptions thrown by the callable are caught at the boundary and raised as
+  Luau errors. They never unwind through the VM.
+- Lifetime: the callable is stored in a Luau userdata with a destructor, owned
+  by the Luau closure. Overwriting or removing the global lets the garbage
+  collector release the callable; registrations are not kept until the State is
+  destroyed. Callables that capture references to host objects must not outlive
+  those objects; that is the host's responsibility.
+- Assigning again replaces the function; `lua["Add"] = nullptr` removes it.
+- The same mechanism backs `Library::set_function`, which accepts every callable
+  above and not only raw function pointers.
 
 ---
 
@@ -446,7 +470,14 @@ layer on top of it.
 ```cpp
 // Handle: resolved once, called many times.
 Result<Function> multiply = lua.get_function("Multiply");
-Result<int> product = multiply->call_as<int>(6, 7);
+if (!multiply)
+{
+    // missing global or not a function
+}
+
+Function& fn = multiply.value();
+Result<int> product = fn.call_as<int>(6, 7);
+Result<std::vector<Value>> values = fn(6, 7);   // operator() sugar
 
 // Convenience: the global is looked up again on every call.
 Result<int> product2 = lua["Multiply"].call_as<int>(6, 7);
@@ -492,6 +523,9 @@ Result<R> Function::call_as(Args&&... args) const;
 Rules:
 
 - `get_function` returns a `Type` error if the global is not a function.
+- `get_function` returns `Result<Function>`, and `Result` itself is not
+  callable: the handle is unwrapped first (`value()`), then called. The call
+  returns its own `Result`.
 - `call` and `call_as` use `lua_pcall`. A Luau error is returned as a `Runtime`
   error with message and, where available, source location; it is never thrown.
 - Arguments are converted like `State::push`. Unsupported argument types are
@@ -502,6 +536,7 @@ Rules:
   `Type` error for every `R` except `Value` and `void`.
 - Stack height is identical before and after every call, on success and failure.
 - A call must run on the State's execution context. It is not thread-safe.
+- `Function::operator()(args...)` is sugar for `call(args...)`.
 - A call is a top-level entry for execution limits (Chapter 25.3).
 - Hot paths (per-entity or per-frame callbacks) must hold a `Function` and not
   call through `lua["Name"]`, because the latter performs a global lookup per
@@ -525,6 +560,7 @@ uses `Table` or `Function` handles.
 | `lua["x"].is<T>()` / `.type()` | Type query without conversion. | Never fails. |
 | `lua["t"]["k"]` | Chained access into a table. | See below. |
 | `lua["f"].call(args...)` / `.call_as<R>(args...)` | Looks up the function and calls it (Chapter 12.1). | Returns `Result`. |
+| `lua["f"](args...)` | Sugar for `call(args...)`. | Returns `Result<std::vector<Value>>`, marked `[[nodiscard]]`. |
 
 Rules:
 
@@ -542,6 +578,14 @@ Rules:
   (Chapter 25), `Table::operator[]` the table.
 - `operator[]` with an integer index addresses array slots 1..n once `Table`
   supports integer keys (Phase 2).
+- `operator()` is exactly `call`: `lua["add"](1, 2)` returns a
+  `Result<std::vector<Value>>`. It never throws for Luau errors. There is
+  deliberately no implicit conversion of the result to `int` or similar:
+  unchecked conversions would hide runtime errors and contradict the
+  `Result` model (Chapter 19). Typed results use `call_as<R>`.
+- `operator()` is a convenience for scripts, tools and tests. It performs a
+  global lookup on every call, and `call` allocates a result vector. Hot
+  paths hold a `Function` and use `call_as<R>` (Chapter 12.1).
 
 ---
 
@@ -2276,7 +2320,8 @@ tests/
 | State and lifetime | creation, destruction, move semantics if supported, configuration, repeated create/destroy |
 | Values, stack, and globals | supported conversions, invalid conversions, stack indices, global get/set, missing and reference-valued globals, embedded-null names, stack balance after success and failure |
 | Tables and functions | get/set, missing keys, argument/return conversion, protected calls, error propagation |
-| Function handles and references | `get_function`, `call`/`call_as` (single, multiple, missing results), calls after State destruction, stack balance, `operator[]` get/set/remove, chained access, missing intermediates, no auto-vivification, throwing vs `Result` paths |
+| Function handles and references | `get_function`, `call`/`call_as` (single, multiple, missing results), calls after State destruction, stack balance, `operator[]` and `operator()` get/set/remove/call, chained access, missing intermediates, no auto-vivification, throwing vs `Result` paths |
+| C++ callable binding | function pointers, function names, captureless and capturing lambdas, `std::function`, functors, `resolve` and `overloads`, wrong argument count and type, exceptions become Luau errors, `Result<T>` failure becomes a Luau error, replacement and `nullptr` removal, callable destroyed after overwrite and garbage collection (no growth of registrations), destruction at State end |
 | Standard libraries, sandbox, limits | each `StdLib` flag, `Safe` excludes `Os`/`Debug`, library tables read-only after sandboxing, script-local assignments, safepoint limit terminates `while true do end`, limit not survivable via `pcall`, nested-call budget sharing, per-call override order, `request_interrupt` from another thread, no overhead path when unset |
 | Bindings | free functions, lambdas, member methods, const methods, properties, read-only properties, constructors, overload resolution |
 | Userdata | type checks, ownership, destruction, Local/Transferable/Shared policy enforcement |
@@ -2567,7 +2612,12 @@ or operation leaves the State and stack in a documented, usable state.
 - Implement global get/set.
 - Implement Luau function handles and protected calls (Chapter 12.1).
 - Support argument and return-value conversion.
-- Implement `operator[]` references (Chapter 12.2).
+- Implement `operator[]` references including `operator()` sugar
+  (Chapter 12.2).
+- Implement generic C++ callable binding (Chapter 11): function pointers,
+  lambdas, `std::function` and functors, stored in a userdata with a
+  destructor. Replace `LibraryFunctionPointer`; `Library::set_function`
+  uses the same mechanism.
 - Extend `Table` with integer keys and nested table handles; add a native
   Luau `vector` alternative to `Value` (width follows the vendored Luau build).
 - Preserve structured compile/runtime/type error details where available.
@@ -2575,8 +2625,10 @@ or operation leaves the State and stack in a documented, usable state.
 **Exit criteria:** end-to-end tests cover values crossing the C++/Luau
 boundary, successful calls, and error paths.
 
-**Status:** global get/set is implemented. Function handles, `operator[]`,
-nested tables and vector values are open. Phases 3 to 8 were started before
+**Status:** global get/set is implemented. `Library::set_function` accepts
+only raw function pointers and keeps every registration until the State is
+destroyed (`bindingRegistrations` is append-only). Function handles,
+`operator[]`, callable binding, nested tables and vector values are open. Phases 3 to 8 were started before
 this phase was complete; Phase 2 and Phase 2b are now the gate for Phase 9.
 
 ## Phase 2b: Standard Libraries, Sandbox and Execution Limits
