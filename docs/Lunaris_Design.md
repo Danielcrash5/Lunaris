@@ -545,9 +545,24 @@ Rules:
 ## 12.2 References with `operator[]`
 
 `State`, `Script` (its environment) and `Table` provide `operator[]`, returning
-a lightweight `Reference`. A `Reference` is a non-owning view of "this key in this
-container". It must not be stored beyond the full expression; long-lived access
-uses `Table` or `Function` handles.
+a `Reference`. A `Reference` is a lazy path ("this key in this container"), not
+a snapshot of a value. It owns its key path and a handle to its root, so storing
+it is safe: `auto ref = lua["x"];` reads nothing, every later `get`, `set` or
+call resolves the path again, and after the State is destroyed it fails with an
+`Error` instead of dangling. Reading a value is always explicit:
+
+```cpp
+auto ref       = lua["x"];                  // Reference (lazy path, no read)
+auto checked   = lua["x"].get<int>();       // Result<int>, reads now
+int  fallback  = lua["x"].get_or<int>(0);   // int
+Value snapshot = lua["x"].get<Value>().value();
+```
+
+There is deliberately no implicit conversion (`int v = lua["x"];`): it would
+need to throw on a type mismatch and would make `auto v = lua["x"]` look like a
+value read while it is not. Creating a `Reference` copies its key path (small
+strings do not allocate) and a weak State handle, and every access resolves the
+path again. Hot paths therefore hold `Table` or `Function` handles.
 
 | Expression | Meaning | Failure behavior |
 |---|---|---|
@@ -2320,7 +2335,7 @@ tests/
 | State and lifetime | creation, destruction, move semantics if supported, configuration, repeated create/destroy |
 | Values, stack, and globals | supported conversions, invalid conversions, stack indices, global get/set, missing and reference-valued globals, embedded-null names, stack balance after success and failure |
 | Tables and functions | get/set, missing keys, argument/return conversion, protected calls, error propagation |
-| Function handles and references | `get_function`, `call`/`call_as` (single, multiple, missing results), calls after State destruction, stack balance, `operator[]` and `operator()` get/set/remove/call, chained access, missing intermediates, no auto-vivification, throwing vs `Result` paths |
+| Function handles and references | `get_function`, `call`/`call_as` (single, multiple, missing results), calls after State destruction, stack balance, `operator[]` and `operator()` get/set/remove/call, chained access, missing intermediates, no auto-vivification, throwing vs `Result` paths, a stored `Reference` (including `auto r = lua["a"]["b"]` with temporary parents) re-resolves lazily and fails cleanly after State destruction |
 | C++ callable binding | function pointers, function names, captureless and capturing lambdas, `std::function`, functors, `resolve` and `overloads`, wrong argument count and type, exceptions become Luau errors, `Result<T>` failure becomes a Luau error, replacement and `nullptr` removal, callable destroyed after overwrite and garbage collection (no growth of registrations), destruction at State end |
 | Standard libraries, sandbox, limits | each `StdLib` flag, `Safe` excludes `Os`/`Debug`, library tables read-only after sandboxing, script-local assignments, safepoint limit terminates `while true do end`, limit not survivable via `pcall`, nested-call budget sharing, per-call override order, `request_interrupt` from another thread, no overhead path when unset |
 | Bindings | free functions, lambdas, member methods, const methods, properties, read-only properties, constructors, overload resolution |
