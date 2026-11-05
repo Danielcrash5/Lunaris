@@ -29,6 +29,7 @@ The wrapper should provide:
 - convenient stack access
 - global access
 - C++ function binding
+- Luau function handles with protected calls and `lua["name"]` references
 - C++ userdata/usertype binding
 - constructors
 - properties
@@ -38,6 +39,8 @@ The wrapper should provide:
 - error handling
 - custom allocator support
 - optional per-State Luau memory limit
+- selectable Luau standard libraries and a sandboxed State profile
+- execution limits (safepoint budget and wall-clock time) for untrusted scripts
 - compiler and bytecode handling
 - bytecode caching
 - standalone-script management
@@ -183,6 +186,19 @@ Possible future configuration options include:
 - library configuration
 
 The configuration must remain extensible without breaking the public API.
+
+Planned additions (Chapters 25.1 to 25.3):
+
+```cpp
+struct StateConfig
+{
+    Allocator allocator{};
+    std::optional<std::size_t> memoryLimit;
+    StdLib libraries = StdLib::None;         // Chapter 25.1
+    bool sandbox = false;                    // Chapter 25.2
+    std::optional<ExecutionLimits> limits;   // Chapter 25.3
+};
+```
 
 ---
 
@@ -423,13 +439,17 @@ function Multiply(a, b)
 end
 ```
 
-Lunaris:
+Lunaris offers two entry points. A `Function` handle is the primary API and is
+meant for hot paths. The `lua["Name"]` reference (Chapter 12.2) is a convenience
+layer on top of it.
 
 ```cpp
-auto result =
-    lua["Multiply"]
-        .call(6, 7)
-        .get<int>();
+// Handle: resolved once, called many times.
+Result<Function> multiply = lua.get_function("Multiply");
+Result<int> product = multiply->call_as<int>(6, 7);
+
+// Convenience: the global is looked up again on every call.
+Result<int> product2 = lua["Multiply"].call_as<int>(6, 7);
 ```
 
 The direct Luau equivalent requires explicit stack management:
@@ -452,6 +472,76 @@ int result =
 
 lua_pop(L, 1);
 ```
+
+## 12.1 Function Handles
+
+`Function` is a move-only, registry-backed handle, like `Table`. It keeps the
+Luau function alive, may outlive its `State`, and fails explicitly (an `Error`,
+never undefined behavior) when called after the State has been destroyed.
+
+```cpp
+Result<Function> State::get_function(std::string_view name);
+
+template <typename... Args>
+Result<std::vector<Value>> Function::call(Args&&... args) const;
+
+template <typename R, typename... Args>
+Result<R> Function::call_as(Args&&... args) const;
+```
+
+Rules:
+
+- `get_function` returns a `Type` error if the global is not a function.
+- `call` and `call_as` use `lua_pcall`. A Luau error is returned as a `Runtime`
+  error with message and, where available, source location; it is never thrown.
+- Arguments are converted like `State::push`. Unsupported argument types are
+  rejected at compile time.
+- `call` returns all results as `Value`s. `call_as<R>` converts the first result;
+  `R` is `void`, a scalar type, `Value`, or a `std::tuple` of those for several
+  results. Extra results are discarded; a missing result is nil and therefore a
+  `Type` error for every `R` except `Value` and `void`.
+- Stack height is identical before and after every call, on success and failure.
+- A call must run on the State's execution context. It is not thread-safe.
+- A call is a top-level entry for execution limits (Chapter 25.3).
+- Hot paths (per-entity or per-frame callbacks) must hold a `Function` and not
+  call through `lua["Name"]`, because the latter performs a global lookup per
+  call.
+
+## 12.2 References with `operator[]`
+
+`State`, `Script` (its environment) and `Table` provide `operator[]`, returning
+a lightweight `Reference`. A `Reference` is a non-owning view of "this key in this
+container". It must not be stored beyond the full expression; long-lived access
+uses `Table` or `Function` handles.
+
+| Expression | Meaning | Failure behavior |
+|---|---|---|
+| `lua["x"] = 5;` | Sets a scalar value. | Throws `std::invalid_argument` (unconvertible value, embedded null byte). |
+| `lua["f"] = [](int a, int b) { ... };` | Registers a C++ callable (Chapter 11). | Throws as above. |
+| `lua["x"] = nullptr;` | Removes the key (sets nil). | None. |
+| `lua["x"].set(value)` | Same as assignment, non-throwing. | Returns `Result<void>`. |
+| `lua["x"].get<T>()` | Reads and converts. `T` is a scalar type, `Value`, `Table` or `Function`. | Returns `Result<T>`; wrong type is a `Type` error. |
+| `lua["x"].get_or<T>(fallback)` | Reads, falls back for nil or wrong type. | Never fails. |
+| `lua["x"].is<T>()` / `.type()` | Type query without conversion. | Never fails. |
+| `lua["t"]["k"]` | Chained access into a table. | See below. |
+| `lua["f"].call(args...)` / `.call_as<R>(args...)` | Looks up the function and calls it (Chapter 12.1). | Returns `Result`. |
+
+Rules:
+
+- Access is raw: `__index` and `__newindex` are not invoked, consistent with
+  `Table` (Chapter 9).
+- Reading a missing key yields nil. Reading through a missing or non-table
+  intermediate yields a `Type` error from `get`/`call`, not nil.
+- There is no auto-vivification: `lua["a"]["b"] = 1` on a missing `a` fails
+  instead of creating a table.
+- Assignment cannot return a `Result`, so `operator=` throws for misuse of the
+  wrapper API (consistent with `State::push`), while every operation that can fail
+  because of Luau state returns `Result`. Engine code that must not throw uses
+  `set`.
+- `Script::operator[]` reads and writes the script-local environment
+  (Chapter 25), `Table::operator[]` the table.
+- `operator[]` with an integer index addresses array slots 1..n once `Table`
+  supports integer keys (Phase 2).
 
 ---
 
@@ -724,7 +814,8 @@ enum class ErrorType
     Type,
     Memory,
     Cache,
-    Module
+    Module,
+    Limit   // execution limit exceeded (Chapter 25.3)
 };
 ```
 
@@ -963,8 +1054,112 @@ compiled `Script`. C++ can inspect or update the environment through
 `Script::get_global` and `Script::set_global`; setting nil removes a local
 override and exposes the inherited value again.
 
-This is namespace isolation, not a security sandbox: State globals and
-capabilities exposed through them remain accessible to scripts.
+This is namespace isolation, not a security boundary: State globals and
+capabilities exposed through them remain accessible to scripts. Untrusted code
+requires a sandboxed State (25.2) and execution limits (25.3) in addition to
+environment isolation.
+
+## 25.1 Standard Libraries
+
+A new State contains no Luau libraries: without opening them, scripts have no
+`pcall`, `print`, `string`, `table` or `math`. Lunaris never opens libraries
+implicitly. The host selects them explicitly:
+
+```cpp
+enum class StdLib : std::uint32_t
+{
+    None      = 0,
+    Base      = 1 << 0,   // pcall, tostring, type, ...
+    Coroutine = 1 << 1,
+    Table     = 1 << 2,
+    String    = 1 << 3,
+    Math      = 1 << 4,
+    Bit32     = 1 << 5,
+    Buffer    = 1 << 6,
+    Utf8      = 1 << 7,
+    Vector    = 1 << 8,
+    Integer   = 1 << 9,
+    Os        = 1 << 10,
+    Debug     = 1 << 11,
+    Safe      = Base | Coroutine | Table | String | Math | Bit32 | Buffer |
+                Utf8 | Vector | Integer,   // everything except Os and Debug
+    All       = Safe | Os | Debug
+};
+
+StateConfig config;
+config.libraries = StdLib::Safe;       // or lua.open_libraries(StdLib::Safe)
+```
+
+Rules:
+
+- `State::open_libraries(StdLib)` is additive and idempotent. Existing globals
+  are not replaced. `open_coroutine_library()` remains as a convenience for
+  `open_libraries(StdLib::Coroutine)`.
+- The set of available libraries follows the vendored Luau revision; a flag whose
+  library does not exist in that revision is rejected with an `invalid_argument`.
+- Libraries are opened before the State is sandboxed (25.2).
+- `Os` and `Debug` are excluded from `Safe` and must not be enabled for
+  untrusted States.
+
+## 25.2 Sandboxed States
+
+`StateConfig::sandbox = true` (or `State::sandbox()`) applies Luau's sandbox
+mode: library tables and the global table become read-only for scripts and
+Luau's safe-environment optimizations may apply.
+
+- Sandboxing is the last step of State setup: open libraries, register
+  libraries and bindings, then sandbox. Lunaris `Library` registration and
+  `set_global` temporarily lift read-only protection internally; scripts never can.
+- Script environments (Chapter 25) already behave like per-script proxies of the
+  sandboxed globals: assignments stay local to the script.
+- Performance: script environments currently disable Luau's safe-environment
+  fast path. Whether sandboxed environments can keep it must be decided by
+  benchmark (Chapter 44.7), not by assumption.
+- Two documented profiles. Trusted (team gameplay code, editor tools):
+  `StdLib::Safe` or `All`, no sandbox required, generous limits. Untrusted
+  (user-generated content): `StdLib::Safe`, sandbox, memory limit, strict
+  execution limits, a module loader restricted to explicit catalog entries, no
+  LuaRocks provider.
+- Not a goal: protection against malicious native code. For untrusted States, the
+  bindings the host registers are the attack surface and must be reviewed.
+
+## 25.3 Execution Limits
+
+Luau has no instruction counter. Lunaris bounds execution through Luau's
+`interrupt` callback, which runs at safepoints (loop back edges, calls, returns,
+garbage collection).
+
+```cpp
+struct ExecutionLimits
+{
+    std::optional<std::uint64_t> maxSafepoints;           // deterministic
+    std::optional<std::chrono::nanoseconds> maxDuration;  // wall clock
+};
+
+lua.set_execution_limits(ExecutionLimits{ .maxDuration = 5ms });
+```
+
+Rules:
+
+- Limits apply per top-level entry: `Script::execute`, `Function::call` and each
+  resumption by `State::resume_ready`. Nested C++ to Luau calls share the outer
+  budget. Time suspended in an awaited Future does not count.
+- Resolution order: explicit per-call limits, then the `Script` or `Function`
+  override, then the State default. This allows a generous budget for team code
+  and a strict budget for user-generated scripts inside one State.
+- Exceeding a limit aborts execution with `ErrorType::Limit`. A script must not
+  be able to survive a limit by wrapping code in `pcall`; this is an explicit exit
+  criterion (Phase 2b).
+- `maxSafepoints` exists so that limit behavior is testable without sleeps
+  (Chapter 44). `maxDuration` reads a monotonic clock only every N safepoints.
+- Wall-clock time includes time spent in host C++ callbacks.
+- With no limits configured, no interrupt callback is installed and the cost is
+  zero.
+- `State::request_interrupt()` is thread-safe (Luau allows setting the interrupt
+  from any thread). A host-owned watchdog can use it to abort a runaway script,
+  without Lunaris creating threads (Principle 7).
+- Frequency limits for scripts that loop around `wait()` (user-generated
+  content) belong to the host scheduler, not the wrapper.
 
 ---
 
@@ -1379,7 +1574,7 @@ Lunaris:
 lua["Answer"] = 100;
 
 int answer =
-    lua["Answer"].get<int>();
+    lua["Answer"].get_or<int>(0);
 ```
 
 ## C++ function
@@ -1443,10 +1638,8 @@ else
 Lunaris:
 
 ```cpp
-auto result =
-    lua["Multiply"]
-        .call(6, 7)
-        .get<int>();
+Result<int> result =
+    lua["Multiply"].call_as<int>(6, 7);
 ```
 
 Or using the Result API:
@@ -2001,6 +2194,7 @@ Goals:
 - optional allocator profiling
 - no mutex-based VM safety
 - predictable lifetime management
+- no clock reads or interrupt callbacks while no execution limit is configured
 
 The wrapper should benchmark common operations against direct Luau C API usage.
 
@@ -2082,6 +2276,8 @@ tests/
 | State and lifetime | creation, destruction, move semantics if supported, configuration, repeated create/destroy |
 | Values, stack, and globals | supported conversions, invalid conversions, stack indices, global get/set, missing and reference-valued globals, embedded-null names, stack balance after success and failure |
 | Tables and functions | get/set, missing keys, argument/return conversion, protected calls, error propagation |
+| Function handles and references | `get_function`, `call`/`call_as` (single, multiple, missing results), calls after State destruction, stack balance, `operator[]` get/set/remove, chained access, missing intermediates, no auto-vivification, throwing vs `Result` paths |
+| Standard libraries, sandbox, limits | each `StdLib` flag, `Safe` excludes `Os`/`Debug`, library tables read-only after sandboxing, script-local assignments, safepoint limit terminates `while true do end`, limit not survivable via `pcall`, nested-call budget sharing, per-call override order, `request_interrupt` from another thread, no overhead path when unset |
 | Bindings | free functions, lambdas, member methods, const methods, properties, read-only properties, constructors, overload resolution |
 | Userdata | type checks, ownership, destruction, Local/Transferable/Shared policy enforcement |
 | Allocator | allocate/reallocate/free accounting, peak/current bytes, memory-limit boundary and over-limit failures, failed reallocation preserving old storage, custom allocator integration, user-data lifetime |
@@ -2136,6 +2332,9 @@ GoogleTest is not a benchmark framework. Keep benchmarks separate (for example, 
 - Userdata method/property access.
 - Script compile/load/execute with and without bytecode cache.
 - Allocator profiling overhead.
+- Luau function call: `lua["F"].call`, `Function` handle and direct `lua_pcall`.
+- Script environments with and without Luau's safe-environment fast path.
+- Interrupt overhead with limits unset, safepoint-counted and time-checked.
 
 Benchmarks report compiler, build type, CPU, Luau revision and benchmark configuration. Avoid hard pass/fail timing thresholds in ordinary CI; use performance baselines and investigate material regressions.
 
@@ -2173,6 +2372,12 @@ The wrapper must define ownership clearly for:
 - module environments
 
 Host-provided C++ objects must not be destroyed by Luau unless ownership has explicitly been transferred.
+
+Lunaris distinguishes trusted and untrusted States (Chapter 25.2). Environment
+isolation alone is not a security boundary. Untrusted code requires a sandboxed
+State, a restricted standard library, a memory limit and execution limits
+(Chapters 8.1, 25.1 to 25.3), and every host function exposed to it must treat
+its arguments as hostile.
 
 ---
 
@@ -2360,12 +2565,34 @@ or operation leaves the State and stack in a documented, usable state.
 ## Phase 2: Globals and Function Calls
 
 - Implement global get/set.
-- Implement Luau function handles and protected calls.
+- Implement Luau function handles and protected calls (Chapter 12.1).
 - Support argument and return-value conversion.
+- Implement `operator[]` references (Chapter 12.2).
+- Extend `Table` with integer keys and nested table handles; add a native
+  Luau `vector` alternative to `Value` (width follows the vendored Luau build).
 - Preserve structured compile/runtime/type error details where available.
 
 **Exit criteria:** end-to-end tests cover values crossing the C++/Luau
 boundary, successful calls, and error paths.
+
+**Status:** global get/set is implemented. Function handles, `operator[]`,
+nested tables and vector values are open. Phases 3 to 8 were started before
+this phase was complete; Phase 2 and Phase 2b are now the gate for Phase 9.
+
+## Phase 2b: Standard Libraries, Sandbox and Execution Limits
+
+- Add `StdLib`, `StateConfig::libraries` and `State::open_libraries`
+  (Chapter 25.1).
+- Add sandbox mode (Chapter 25.2) and decide the safe-environment question by
+  benchmark.
+- Add `ExecutionLimits`, `ErrorType::Limit` and `State::request_interrupt`
+  (Chapter 25.3).
+
+**Exit criteria:** a script without opened libraries has no standard globals; a
+sandboxed State rejects script writes to library tables; `while true do end`
+terminates with `ErrorType::Limit` under a safepoint limit and under a time
+limit; a limit cannot be survived through `pcall`; limits unset install no
+interrupt callback.
 
 ## Phase 3: C++ Bindings
 
@@ -2471,6 +2698,9 @@ parallel message callbacks, transferable userdata, and automated scheduler
 integration remain open.
 
 ## Phase 9: Optional Integrations and Release Readiness
+
+**Prerequisites:** Phase 2 and Phase 2b are complete. GLM and reflection
+bindings need tables, functions and vectors to cross the C++/Luau boundary.
 
 - Add the optional GLM extension.
 - Add reflection integration above the standalone wrapper.
