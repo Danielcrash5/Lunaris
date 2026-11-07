@@ -69,7 +69,7 @@ if(LUNARIS_BUILD_TESTS)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     add_subdirectory("thirdparty/googletest" EXCLUDE_FROM_ALL)
-    # Schritt 5: add_subdirectory(tests)
+    add_subdirectory(tests)
 endif()
 
 # --- Examples -----------------------------------------------------------------
