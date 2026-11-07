@@ -5,6 +5,11 @@ TEST(StateTest, CreateAndDestroy) {
     EXPECT_NO_THROW({ lunaris::State state; });
 }
 
+TEST(StateTest, LuaStatePointer) {
+    lunaris::State state;
+    EXPECT_NE(state.luaState(), nullptr);
+}
+
 TEST(StateTest, MoveConstructor) {
     lunaris::State state1;
     lunaris::State state2(std::move(state1));
