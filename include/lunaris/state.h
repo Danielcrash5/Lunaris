@@ -2,15 +2,12 @@
 #include <lua.h>
 #include <memory>
 
-namespace Lunnaris {
-
-namespace {
+namespace lunaris {
 struct LuaDeleter {
     void operator()(lua_State *state) const noexcept {
         lua_close(state);
     }
 };
-} // namespace
 
 /// Owns a Luau state and closes it when destroyed.
 class State {
@@ -25,4 +22,4 @@ class State {
   private:
     std::unique_ptr<lua_State, LuaDeleter> m_luaState;
 };
-} // namespace Lunnaris
+} // namespace lunaris

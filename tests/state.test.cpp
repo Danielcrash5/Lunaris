@@ -1,2 +1,2 @@
-#include <google_test/gtest.h>
+#include <gtest/gtest.h>
 #include <lunaris/state.h>
