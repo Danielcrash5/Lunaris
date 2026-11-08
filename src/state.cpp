@@ -1,6 +1,6 @@
 #include "lunaris/state.h"
 
-#include <stdexcept>
+#include <new>
 #include <utility>
 
 #include <lua.h>

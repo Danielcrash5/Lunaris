@@ -25,6 +25,9 @@
       "configurePreset": "default",
       "output": {
         "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
       }
     }
   ]
