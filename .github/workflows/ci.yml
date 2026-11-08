@@ -21,7 +21,7 @@ jobs:
       matrix:
         include:
           - name: Linux (GCC)
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - name: Windows (MSVC)
             os: windows-latest
             cmake-args: -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
@@ -56,7 +56,7 @@ jobs:
   sanitize:
     name: Linux (GCC, ASan + UBSan)
     needs: build-test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -71,3 +71,18 @@ jobs:
 
       - name: Test
         run: ctest --preset sanitize
+
+  clang-tidy:
+    name: clang-tidy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang-tidy
+
+      - name: Configure (creates compile_commands.json)
+        run: cmake --preset default
+
+      - name: Run clang-tidy
+        run: clang-tidy -p build src/*.cpp tests/*.cpp

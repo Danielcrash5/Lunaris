@@ -46,7 +46,7 @@ class State {
     /// long as the State object is alive.
     /// @return the underlying lua_State pointer. Is nullptr if the State object
     /// is in a moved-from state.
-    lua_State *luaState() const noexcept;
+    [[nodiscard]] lua_State *luaState() const noexcept;
 
   private:
     /// @brief A unique_ptr that owns the lua_State pointer and automatically
