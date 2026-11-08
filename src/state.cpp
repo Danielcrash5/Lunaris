@@ -9,7 +9,7 @@
 namespace lunaris {
 State::State() : m_luaState(luaL_newstate()) {
     if (!m_luaState) {
-        throw std::bad_alloc("Failed to create Lua state");
+        throw std::bad_alloc();
     }
 }
 
