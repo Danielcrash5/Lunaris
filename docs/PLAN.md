@@ -3,8 +3,8 @@
 Dieses Dokument ist der einzige Plan. Es bleibt kurz. Neue Ideen kommen in die
 Später-Liste, nicht in den Plan.
 
-**Nächster Schritt:** CI aufsetzen (Linux GCC, Windows MSVC), danach der
-ASan-/UBSan-Job.
+**Nächster Schritt:** CI-Lauf grün bekommen (Linux GCC, Windows MSVC, danach
+ASan-/UBSan-Job), dann `openLibraries` (Tabellenzeile 1) und `.clang-tidy`.
 
 ## Zielsatz
 
@@ -31,8 +31,24 @@ Speicher, geschützte Globals).
 - Luau ist vendort (`thirdparty/luau`), Version steht in `VERSION.md` dort.
 - Version einmalig in `project(Lunaris VERSION …)`, Release per Git-Tag.
 - Global-Scope ist der Default. Die Sandbox ist ein expliziter Modus.
-- `buffer` kommt in 0.1. Für `vector` gibt es einen Hook zu eigenen
-  Vektortypen. Der Kern hängt von keiner Math-Bibliothek ab.
+- `buffer` kommt in 0.1. Eigene Vektortypen werden über einen Hook
+  eingebunden. Lunaris bleibt beim Luau-Standard (float, 3 Komponenten),
+  wrappt Luaus `vector`-Bibliothek nicht und reicht keine Luau-Build-Optionen
+  durch. Der Kern hängt von keiner Math-Bibliothek ab.
+- Handles halten einen gemeinsamen Kontext (`std::shared_ptr`), den auch der
+  `State` besitzt. `State` schließt den `lua_State` explizit über den Kontext.
+  Handles werden mit dem Schließen des States ungültig. Ihr Zugriff wirft dann
+  eine `Error`, ihr Destruktor bleibt still. Das Speicherlayout hängt nicht vom
+  Build-Typ ab. Umgebaut wird `State` mit dem ersten Handle-Typ (Zeile 3).
+- `Error::what()` liefert immer einen String: Strings unverändert, Zahlen und
+  Booleans als Text, alles andere als Hinweis mit dem Typnamen. Keine
+  Metamethoden. `kind` kommt getrennt aus dem Luau-Status. Bei `LUA_ERRMEM`
+  kann stattdessen `std::bad_alloc` ankommen.
+- Bis `lunaris::Error` existiert, wirft `State` bei Speichermangel
+  `std::bad_alloc`.
+- Usertypes verwenden Userdata-Tags. Die Zuordnung Typ → Tag liegt pro State
+  in einer Map, nie in einer statischen Variablen. Beim Erreichen des
+  Tag-Limits wirft die Registrierung eine `Error`.
 - Lizenz MIT. Doku: Doxygen für die API, `docs/` für Handbuch und Plan.
 
 ## Tabelle: Sol3 → Lunaris → Luau-Abweichung
@@ -48,7 +64,7 @@ Namen sind vorläufig.
 | 5 | C++-Funktionen binden | `setFunction` | `catch(...)` an der Grenze, `lua_error` erst nach dem try/catch |
 | 6 | Tabellen | `Table` | Zugriffe können Metamethoden auslösen oder an readonly scheitern |
 | 7 | Coroutinen (0.2) | | `lua_newthread`, `lua_resume`, Handles dürfen nicht am Haupt-State hängen |
-| 8 | Usertypes | | Userdata-Tags mit Destruktor, Tag-Limit prüfen (`LUA_UTAG_LIMIT`) |
+| 8 | Usertypes | | Userdata-Tags mit Destruktor, Zuordnung pro State, `Error` beim Erreichen von `LUA_UTAG_LIMIT` |
 | 9 | Environments, Sandbox | | `luaL_sandbox`, `luaL_sandboxthread`, Interrupt-Callback, Allocator mit Limit |
 | 10 | Container, `object` | | später |
 
@@ -75,22 +91,20 @@ Reihenfolge: Zeilen 1–6 sind 0.1, danach 7, 8, 9.
 - [ ] Tabellenzeilen 2–6, jede mit Example, Test und Doxygen-Kommentar
 - [ ] Roundtrip-Tests: C++-Exception durch einen Luau-Frame, Luau-Fehler nach
       C++, nicht-String-Fehlerwert
+- [ ] Handle-Test: Zugriff nach dem Ende des States wirft eine `Error`, der
+      Destruktor bleibt still
 - [ ] Doxygen ohne Warnungen, `.clang-tidy` aktiv
 - [ ] `README.md`, `LICENSE`
 - [ ] Git-Tag `v0.1.0`
 
 ## Offene Entscheidungen
 
-- Bleibt Luaus `vector` fest bei `float` mit 3 Komponenten, oder reicht
-  Lunaris `LUAU_VECTOR_DOUBLE` und `LUAU_VECTOR_FOUR_WIDE` durch?
-- Handle-Lebensdauer: Doku plus Debug-Assert, oder gemeinsamer Kontext, damit
-  ein Handle den State nicht überlebt.
-- Usertypes: Userdata-Tags oder Metatables, und was oberhalb des Tag-Limits.
-- Was liefert `Error::what()` bei einem nicht-String-Fehlerwert.
-- Speicherfehler beim Erzeugen: `std::bad_alloc` bis `lunaris::Error` kommt.
+- Welche `kind` hat die `Error`, wenn ein Handle nach dem Ende seines States
+  benutzt wird.
 
 ## Später
 
+- Metatable-Fallback für Usertypes oberhalb des Tag-Limits
 - Gecachte Handles für heiße Pfade
 - Adapter für externe Vektor-Bibliotheken (optionaler Header)
 - Typisierte Deklarationsdateien für Luau-Typchecking
