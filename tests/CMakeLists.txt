@@ -1,6 +1,9 @@
 include(GoogleTest)
 
-add_executable(LunarisTests state.test.cpp)
+add_executable(LunarisTests
+    state.test.cpp
+    libraries.test.cpp
+)
 
 target_link_libraries(LunarisTests PRIVATE Lunaris::Lunaris GTest::gtest_main)
 

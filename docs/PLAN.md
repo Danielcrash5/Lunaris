@@ -3,8 +3,8 @@
 Dieses Dokument ist der einzige Plan. Es bleibt kurz. Neue Ideen kommen in die
 Später-Liste, nicht in den Plan.
 
-**Nächster Schritt:** CI-Lauf grün bekommen (Linux GCC, Windows MSVC, danach
-ASan-/UBSan-Job), dann `openLibraries` (Tabellenzeile 1) und `.clang-tidy`.
+**Nächster Schritt:** Doxygen-Konfiguration mit `WARN_AS_ERROR` in der CI,
+danach Tabellenzeile 2 (`script`, `safeScript`) mit der ersten `Error`.
 
 ## Zielsatz
 
@@ -57,7 +57,7 @@ Namen sind vorläufig.
 
 | Nr | Sol3 | Lunaris | Luau-Abweichung |
 |----|------|---------|-----------------|
-| 1 | `state`, `open_libraries` | `State`, `openLibraries` | kein `io`, `os` stark beschnitten, dafür `buffer` und `vector` |
+| 1 | `state`, `open_libraries` | `State`, `openLibraries(Library…)`, `openAllLibraries()` | kein `io`, `os` stark beschnitten, dafür `buffer` und `vector`. Libraries werden mit Name aufgerufen wie in `luaL_openlibs`. `luaL_sandbox` muss danach laufen |
 | 2 | `script`, `safe_script` | `script`, `safeScript` | Compiler erzeugt Bytecode, `compile()` und `load()` getrennt, Fremd-Bytecode nur als „trusted“ |
 | 3 | Variablen, `get<T>` | `state["x"]`, `get<T>` | Zahlen sind nur `double`, `vector` über Hook, `buffer` als Kopie |
 | 4 | Lua-Funktionen aufrufen | `Function`, `safeCall` | Traceback im Message-Handler, Fehlerwerte sind nicht nur Strings |
@@ -87,7 +87,7 @@ Reihenfolge: Zeilen 1–6 sind 0.1, danach 7, 8, 9.
 - [x] `thirdparty/luau/VERSION.md`
 - [ ] CI baut und testet auf Linux (GCC) und Windows (MSVC)
 - [ ] ASan-/UBSan-Job auf Linux
-- [ ] Tabellenzeile 1 (`State` fertig, `openLibraries` offen)
+- [x] Tabellenzeile 1 (`State`, `openLibraries`, `openAllLibraries`)
 - [ ] Tabellenzeilen 2–6, jede mit Example, Test und Doxygen-Kommentar
 - [ ] Roundtrip-Tests: C++-Exception durch einen Luau-Frame, Luau-Fehler nach
       C++, nicht-String-Fehlerwert
@@ -105,6 +105,7 @@ Reihenfolge: Zeilen 1–6 sind 0.1, danach 7, 8, 9.
 ## Später
 
 - Metatable-Fallback für Usertypes oberhalb des Tag-Limits
+- Experimentelle Luau-Libraries `integer` und `class` (hängen an Fast-Flags)
 - Gecachte Handles für heiße Pfade
 - Adapter für externe Vektor-Bibliotheken (optionaler Header)
 - Typisierte Deklarationsdateien für Luau-Typchecking

@@ -30,3 +30,5 @@ CheckOptions:
     value: m_
   - key: readability-identifier-naming.PrivateMemberCase
     value: camelBack
+  - key: readability-identifier-naming.EnumConstantCase
+    value: camelBack
