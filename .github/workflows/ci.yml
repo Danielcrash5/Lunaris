@@ -86,3 +86,15 @@ jobs:
 
       - name: Run clang-tidy
         run: clang-tidy -p build src/*.cpp tests/*.cpp
+
+  docs:
+    name: Doxygen
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Doxygen
+        run: sudo apt-get update && sudo apt-get install -y doxygen
+
+      - name: Build documentation (warnings are errors)
+        run: doxygen docs/Doxyfile

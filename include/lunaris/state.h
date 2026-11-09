@@ -55,6 +55,7 @@ class State {
     /// object will be left in a moved-from state, and its luaState() method
     /// will return nullptr.
     /// @param other The State object to move from.
+    /// @return A reference to this State.
     State &operator=(State &&other) noexcept;
 
     /// @brief Copy constructor: deleted to prevent copying of the State object,

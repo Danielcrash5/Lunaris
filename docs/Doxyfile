@@ -1,0 +1,34 @@
+# Doxygen configuration for the Lunaris API reference.
+# Run from the repository root: doxygen docs/Doxyfile
+# Only keys that differ from the Doxygen defaults are listed.
+
+PROJECT_NAME           = "Lunaris"
+PROJECT_BRIEF          = "A C++23 library for embedding Luau"
+OUTPUT_DIRECTORY       = build-docs
+
+# What is documented: the public headers only.
+INPUT                  = include
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h
+EXCLUDE_SYMBOLS        = lunaris::detail lunaris::detail::*
+
+# Code snippets taken from the examples (\snippet). Enable this as soon as the
+# examples/ directory exists, Doxygen treats a missing directory as an error:
+# EXAMPLE_PATH         = examples
+# EXAMPLE_RECURSIVE    = YES
+
+# Undocumented public symbols are reported instead of silently skipped.
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+
+# Every warning is an error, so that "no feature without documentation" is
+# checked by the build and not by good intentions.
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_IF_INCOMPLETE_DOC = YES
+WARN_NO_PARAMDOC       = YES
+WARN_AS_ERROR          = YES
+
+QUIET                  = YES
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO

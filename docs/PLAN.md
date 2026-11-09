@@ -3,8 +3,9 @@
 Dieses Dokument ist der einzige Plan. Es bleibt kurz. Neue Ideen kommen in die
 Später-Liste, nicht in den Plan.
 
-**Nächster Schritt:** Doxygen-Konfiguration mit `WARN_AS_ERROR` in der CI,
-danach Tabellenzeile 2 (`script`, `safeScript`) mit der ersten `Error`.
+**Nächster Schritt:** `examples/` mit dem ersten Example, danach `EXAMPLE_PATH`
+in `docs/Doxyfile` aktivieren. Danach Tabellenzeile 2 (`script`, `safeScript`)
+mit der ersten `Error`.
 
 ## Zielsatz
 
@@ -93,8 +94,9 @@ Reihenfolge: Zeilen 1–6 sind 0.1, danach 7, 8, 9.
       C++, nicht-String-Fehlerwert
 - [ ] Handle-Test: Zugriff nach dem Ende des States wirft eine `Error`, der
       Destruktor bleibt still
-- [ ] Doxygen ohne Warnungen, `.clang-tidy` aktiv
-- [ ] `README.md`, `LICENSE`
+- [x] `.clang-tidy` aktiv, eigener CI-Job
+- [ ] Doxygen ohne Warnungen, eigener CI-Job
+- [x] `README.md`, `LICENSE`
 - [ ] Git-Tag `v0.1.0`
 
 ## Offene Entscheidungen

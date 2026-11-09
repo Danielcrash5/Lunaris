@@ -4,3 +4,4 @@
 *.user
 *.suo
 /build-sanitize/
+/build-docs/
