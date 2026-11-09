@@ -85,8 +85,8 @@ Reihenfolge: Zeilen 1–6 sind 0.1, danach 7, 8, 9.
 - [x] `project(Lunaris VERSION 0.1.0)`, Target `Lunaris::Lunaris`, Tests nur im
       eigenen Repo
 - [x] `thirdparty/luau/VERSION.md`
-- [ ] CI baut und testet auf Linux (GCC) und Windows (MSVC)
-- [ ] ASan-/UBSan-Job auf Linux
+- [x] CI baut und testet auf Linux (GCC) und Windows (MSVC)
+- [x] ASan-/UBSan-Job auf Linux
 - [x] Tabellenzeile 1 (`State`, `openLibraries`, `openAllLibraries`)
 - [ ] Tabellenzeilen 2–6, jede mit Example, Test und Doxygen-Kommentar
 - [ ] Roundtrip-Tests: C++-Exception durch einen Luau-Frame, Luau-Fehler nach
