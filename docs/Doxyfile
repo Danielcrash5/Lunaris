@@ -12,10 +12,9 @@ RECURSIVE              = YES
 FILE_PATTERNS          = *.h
 EXCLUDE_SYMBOLS        = lunaris::detail lunaris::detail::*
 
-# Code snippets taken from the examples (\snippet). Enable this as soon as the
-# examples/ directory exists, Doxygen treats a missing directory as an error:
-# EXAMPLE_PATH         = examples
-# EXAMPLE_RECURSIVE    = YES
+# Code snippets taken from the examples (\snippet).
+EXAMPLE_PATH           = examples
+EXAMPLE_RECURSIVE      = YES
 
 # Undocumented public symbols are reported instead of silently skipped.
 EXTRACT_ALL            = NO

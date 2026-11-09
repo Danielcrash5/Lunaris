@@ -63,16 +63,19 @@ target_compile_options(Lunaris PRIVATE
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic>
 )
 
-# --- Tests --------------------------------------------------------------------
-if(LUNARIS_BUILD_TESTS)
+# --- Tests und Examples -----------------------------------------------------
+# enable_testing() muss in der Wurzel stehen. Examples laufen ebenfalls als Tests.
+if(LUNARIS_BUILD_TESTS OR LUNARIS_BUILD_EXAMPLES)
     enable_testing()
+endif()
+
+if(LUNARIS_BUILD_TESTS)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     add_subdirectory("thirdparty/googletest" EXCLUDE_FROM_ALL)
     add_subdirectory(tests)
 endif()
 
-# --- Examples -----------------------------------------------------------------
 if(LUNARIS_BUILD_EXAMPLES)
-    # Spaeter: add_subdirectory(examples)
+    add_subdirectory(examples)
 endif()

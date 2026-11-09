@@ -3,9 +3,9 @@
 Dieses Dokument ist der einzige Plan. Es bleibt kurz. Neue Ideen kommen in die
 Später-Liste, nicht in den Plan.
 
-**Nächster Schritt:** `examples/` mit dem ersten Example, danach `EXAMPLE_PATH`
-in `docs/Doxyfile` aktivieren. Danach Tabellenzeile 2 (`script`, `safeScript`)
-mit der ersten `Error`.
+**Nächster Schritt:** Example `examples/open_libraries.cpp` schreiben (die
+CMake-Anbindung steht). Danach Tabellenzeile 2 (`script`, `safeScript`) mit der
+ersten `Error`.
 
 ## Zielsatz
 
