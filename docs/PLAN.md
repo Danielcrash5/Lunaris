@@ -95,7 +95,7 @@ Reihenfolge: Zeilen 1–6 sind 0.1, danach 7, 8, 9.
 - [ ] Handle-Test: Zugriff nach dem Ende des States wirft eine `Error`, der
       Destruktor bleibt still
 - [x] `.clang-tidy` aktiv, eigener CI-Job
-- [ ] Doxygen ohne Warnungen, eigener CI-Job
+- [x] Doxygen ohne Warnungen, eigener CI-Job
 - [x] `README.md`, `LICENSE`
 - [ ] Git-Tag `v0.1.0`
 
