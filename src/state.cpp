@@ -82,16 +82,29 @@ State::State() : m_context(std::make_shared<detail::StateContext>()) {
     }
 }
 
+State::~State() {
+    if (m_context) {
+        m_context->close();
+    }
+}
+
 State &State::operator=(State &&other) noexcept {
     m_context = std::move(other.m_context);
+    other.m_context->close();
     return *this;
 }
 
 lua_State *State::luaState() const noexcept {
+    if (!m_context || !m_context->isOpen()) {
+        return nullptr;
+    }
     return m_context->luaState();
 }
 
 std::shared_ptr<detail::StateContext> State::context() const noexcept {
+    if (!m_context) {
+        return nullptr;
+    }
     return m_context;
 }
 

@@ -37,7 +37,7 @@ class State {
     /// could not be created.
     State();
     /// @brief Destroys the Luau state.
-    ~State() = default;
+    ~State();
 
     /// @brief Move constructor. Transfers ownership of the underlying lua_State
     /// pointer from another State object to this one. The other State object
@@ -68,7 +68,11 @@ class State {
     /// is in a moved-from state.
     [[nodiscard]] lua_State *luaState() const noexcept;
 
-    std::shared_ptr<detail::StateContext> context() const noexcept;
+    /// @brief Returns the underlying state context.
+    /// @return The underlying state context.
+    [[nodiscard]] std::shared_ptr<detail::StateContext>
+    context() const noexcept;
+
     /// @brief Opens the given standard libraries. Libraries that are not
     /// opened are not available to scripts.
     ///
