@@ -2,8 +2,9 @@
 
 #include <lua.h>
 #include <lualib.h>
+
 #include <memory>
-#include <stdexcept>
+#include <new>
 
 namespace lunaris::detail {
 
