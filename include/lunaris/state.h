@@ -8,12 +8,9 @@
 #include <span>
 
 namespace lunaris {
+
 namespace detail {
-struct LuaDeleter {
-    void operator()(lua_State *state) const noexcept {
-        lua_close(state);
-    }
-};
+class StateContext;
 } // namespace detail
 
 /// @brief The standard libraries of Luau that can be opened in a State.
@@ -33,7 +30,6 @@ enum class Library : std::uint8_t {
     buffer,    ///< The `buffer` table.
     vector,    ///< The `vector` table.
 };
-
 /// Owns a Luau state and closes it when destroyed.
 class State {
   public:
@@ -41,7 +37,7 @@ class State {
     /// could not be created.
     State();
     /// @brief Destroys the Luau state.
-    ~State() = default;
+    ~State();
 
     /// @brief Move constructor. Transfers ownership of the underlying lua_State
     /// pointer from another State object to this one. The other State object
@@ -71,6 +67,11 @@ class State {
     /// @return the underlying lua_State pointer. Is nullptr if the State object
     /// is in a moved-from state.
     [[nodiscard]] lua_State *luaState() const noexcept;
+
+    /// @brief Returns the underlying state context.
+    /// @return The underlying state context.
+    [[nodiscard]] std::shared_ptr<detail::StateContext>
+    context() const noexcept;
 
     /// @brief Opens the given standard libraries. Libraries that are not
     /// opened are not available to scripts.
@@ -107,8 +108,6 @@ class State {
     /// @param libraries The libraries to open, may contain duplicates.
     void openLibrariesImpl(std::span<const Library> libraries);
 
-    /// @brief A unique_ptr that owns the lua_State pointer and automatically
-    /// closes it when the State object is destroyed.
-    std::unique_ptr<lua_State, detail::LuaDeleter> m_luaState;
+    std::shared_ptr<detail::StateContext> m_context;
 };
 } // namespace lunaris

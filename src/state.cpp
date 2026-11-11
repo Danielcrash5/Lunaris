@@ -1,4 +1,5 @@
 #include "lunaris/state.h"
+#include "lunaris/detail/state_context.h"
 
 #include <array>
 #include <cstddef>
@@ -75,19 +76,36 @@ void openByMask(lua_State *state, std::uint16_t mask) {
 }
 } // namespace
 
-State::State() : m_luaState(luaL_newstate()) {
-    if (!m_luaState) {
+State::State() : m_context(std::make_shared<detail::StateContext>()) {
+    if (!m_context->luaState()) {
         throw std::bad_alloc();
     }
 }
 
+State::~State() {
+    if (m_context) {
+        m_context->close();
+    }
+}
+
 State &State::operator=(State &&other) noexcept {
-    m_luaState = std::move(other.m_luaState);
+    m_context = std::move(other.m_context);
+    other.m_context->close();
     return *this;
 }
 
 lua_State *State::luaState() const noexcept {
-    return m_luaState.get();
+    if (!m_context || !m_context->isOpen()) {
+        return nullptr;
+    }
+    return m_context->luaState();
+}
+
+std::shared_ptr<detail::StateContext> State::context() const noexcept {
+    if (!m_context) {
+        return nullptr;
+    }
+    return m_context;
 }
 
 void State::openLibrariesImpl(std::span<const Library> libraries) {
@@ -100,10 +118,10 @@ void State::openLibrariesImpl(std::span<const Library> libraries) {
         }
         mask = static_cast<std::uint16_t>(mask | (1U << index));
     }
-    openByMask(m_luaState.get(), mask);
+    openByMask(m_context->luaState(), mask);
 }
 
 void State::openAllLibraries() {
-    openByMask(m_luaState.get(), allLibrariesMask);
+    openByMask(m_context->luaState(), allLibrariesMask);
 }
 } // namespace lunaris
