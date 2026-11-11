@@ -104,6 +104,6 @@ class State {
     /// @param libraries The libraries to open, may contain duplicates.
     void openLibrariesImpl(std::span<const Library> libraries);
 
-    std::shared_ptr<detail::StateContext> m_luaStateContext;
+    std::shared_ptr<detail::StateContext> m_context;
 };
 } // namespace lunaris
