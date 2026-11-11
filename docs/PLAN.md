@@ -24,6 +24,7 @@ Speicher, geschützte Globals).
    `std::expected` gibt es nur für Scripts und Callbacks.
 5. Keine Verweise auf andere Projekte im Repo.
 6. Kein statischer, veränderlicher Zustand in Lunaris (Threads nicht verhindern).
+7. Eigene Header mit "", fremde mit <>. Examples und Tests binden Lunaris wie ein Nutzer mit <lunaris/...> ein.
 
 ## Entscheidungen
 
