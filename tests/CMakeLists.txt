@@ -2,6 +2,7 @@ include(GoogleTest)
 
 add_executable(LunarisTests
     state.test.cpp
+    state_context.test.cpp
     libraries.test.cpp
 )
 

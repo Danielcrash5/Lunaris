@@ -126,6 +126,5 @@ Reihenfolge: Zeilen 1–6 sind 0.1, danach 7, 8, 9.
 - Metatable-Fallback für Usertypes oberhalb des Tag-Limits
 - Experimentelle Luau-Libraries `integer` und `class` (hängen an Fast-Flags)
 - Gecachte Handles für heiße Pfade
-- Adapter für externe Vektor-Bibliotheken (optionaler Header)
 - Typisierte Deklarationsdateien für Luau-Typchecking
 - `Container`, `object`
