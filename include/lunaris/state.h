@@ -46,10 +46,11 @@ class State {
     /// @param other The State object to move from.
     State(State &&other) noexcept = default;
 
-    /// @brief Move assignment operator. Transfers ownership of the underlying
-    /// lua_State pointer from another State object to this one. The other State
-    /// object will be left in a moved-from state, and its luaState() method
-    /// will return nullptr.
+    /// @brief Move assignment operator. Closes the Luau state this object owned
+    /// until now and transfers ownership of the underlying lua_State pointer
+    /// from another State object to this one. The other State object will be
+    /// left in a moved-from state, and its luaState() method will return
+    /// nullptr. Assigning an object to itself has no effect.
     /// @param other The State object to move from.
     /// @return A reference to this State.
     State &operator=(State &&other) noexcept;

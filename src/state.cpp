@@ -89,8 +89,14 @@ State::~State() {
 }
 
 State &State::operator=(State &&other) noexcept {
-    m_context = std::move(other.m_context);
-    other.m_context->close();
+    if (this != &other) {
+        // Close the state this object owned until now, then take over the
+        // other.
+        if (m_context) {
+            m_context->close();
+        }
+        m_context = std::move(other.m_context);
+    }
     return *this;
 }
 
