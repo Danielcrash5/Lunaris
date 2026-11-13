@@ -33,7 +33,7 @@ class Error : public std::runtime_error {
 
     /// @brief Gets the error details.
     /// @return The error details.
-    [[nodiscard]] const ErrorDetails &details() const;
+    [[nodiscard]] const ErrorDetails &details() const noexcept;
 
     /// @brief  Gets the kind of error that occurred.
     /// @return The kind of error.
