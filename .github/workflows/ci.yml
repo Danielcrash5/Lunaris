@@ -78,14 +78,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The clang-tidy of Ubuntu 24.04 (version 18) cannot read <expected> from
+      # the GCC 13 standard library, so a newer one is installed from PyPI.
       - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y ninja-build clang-tidy
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          python3 -m venv .venv
+          .venv/bin/pip install clang-tidy==23.1.4
 
       - name: Configure (creates compile_commands.json)
         run: cmake --preset default
 
       - name: Run clang-tidy
-        run: clang-tidy -p build src/*.cpp tests/*.cpp
+        run: .venv/bin/clang-tidy -p build src/*.cpp tests/*.cpp examples/*.cpp
 
   docs:
     name: Doxygen

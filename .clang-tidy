@@ -5,6 +5,7 @@ Checks: >
   performance-*,
   modernize-*,
   -modernize-use-trailing-return-type,
+  -modernize-use-designated-initializers,
   cppcoreguidelines-special-member-functions,
   readability-identifier-naming
 WarningsAsErrors: '*'
