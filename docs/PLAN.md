@@ -3,9 +3,9 @@
 Dieses Dokument ist der einzige Plan. Es bleibt kurz. Neue Ideen kommen in die
 Später-Liste, nicht in den Plan.
 
-**Nächster Schritt:** `State` auf den gemeinsamen Kontext umbauen (ohne neue
-Features), danach `Error`, danach `script` und `safeScript` mit `ScriptResult`
-(Tabellenzeile 2).
+**Nächster Schritt:** `script`, `safeScript` und `ScriptResult` (Tabellenzeile 2):
+erst der Header, dann Tests und Example, dann die Implementierung mit
+Message-Handler und zentraler Fehlerübersetzung.
 
 ## Zielsatz
 
@@ -55,11 +55,14 @@ Speicher, geschützte Globals).
 - `script` nimmt nur Quelltext (`std::string_view`) und einen Chunk-Namen,
   kein `scriptFile`. Lunaris stellt dem Namen immer `=` voran. Der Name wird
   für Luau nullterminiert kopiert.
-- `Error` trägt `kind` (`compile`, `runtime`, `memory`; `type` kommt mit
-  Zeile 3), Meldung, Chunk-Name, Zeile (`std::optional<int>`) und Traceback
+- `Error` trägt `kind` (`compile`, `runtime`, `memory`, `state`; `type` kommt
+  mit Zeile 3), Meldung, Chunk-Name, Zeile (`std::optional<std::uint32_t>`) und Traceback
   ohne Lunaris-Frames. Bei Laufzeitfehlern kommen Chunk und Zeile aus
   `lua_getinfo` im Message-Handler (erste Lua-Ebene), bei Compile-Fehlern aus
   der Meldung.
+- `ScriptResult` zählt Indizes ab 0. Ein Zugriff nach dem Ende des States wirft
+  eine `Error` mit `ErrorKind::state`, ein Index außerhalb von 0 bis
+  `size() - 1` wirft `std::out_of_range`.
 - Bis `lunaris::Error` existiert, wirft `State` bei Speichermangel
   `std::bad_alloc`.
 - Usertypes verwenden Userdata-Tags. Die Zuordnung Typ → Tag liegt pro State
@@ -104,6 +107,7 @@ Reihenfolge: Zeilen 1–6 sind 0.1, danach 7, 8, 9.
 - [x] CI baut und testet auf Linux (GCC) und Windows (MSVC)
 - [x] ASan-/UBSan-Job auf Linux
 - [x] Tabellenzeile 1 (`State`, `openLibraries`, `openAllLibraries`)
+- [x] `Error` (`kind`, Meldung, Chunk, Zeile, Traceback) mit Tests
 - [ ] Tabellenzeilen 2–6, jede mit Example, Test und Doxygen-Kommentar
 - [ ] Roundtrip-Tests: C++-Exception durch einen Luau-Frame, Luau-Fehler nach
       C++, nicht-String-Fehlerwert
@@ -118,8 +122,7 @@ Reihenfolge: Zeilen 1–6 sind 0.1, danach 7, 8, 9.
 
 ## Offene Entscheidungen
 
-- Welche `kind` hat die `Error`, wenn ein Handle nach dem Ende seines States
-  benutzt wird.
+Keine.
 
 ## Später
 
