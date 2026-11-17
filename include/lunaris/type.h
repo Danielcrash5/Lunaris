@@ -3,6 +3,7 @@
 #include <cstdint>
 
 namespace lunaris {
+/// @brief The type of a value in a Luau state.
 enum class Type : uint8_t {
     none,          ///< No type.
     nil,           ///< Nil type.
@@ -16,4 +17,4 @@ enum class Type : uint8_t {
     thread,        ///< Thread type.
     buffer,        ///< Buffer type.
 };
-}
+} // namespace lunaris
