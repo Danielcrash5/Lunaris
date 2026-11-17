@@ -4,8 +4,7 @@
 
 namespace lunaris {
 /// @brief The type of a value in a Luau state.
-enum class Type : uint8_t {
-    none,          ///< No type.
+enum class Type : std::uint8_t {
     nil,           ///< Nil type.
     boolean,       ///< Boolean type.
     lightuserdata, ///< Light userdata type.
@@ -16,5 +15,7 @@ enum class Type : uint8_t {
     userdata,      ///< Userdata type.
     thread,        ///< Thread type.
     buffer,        ///< Buffer type.
+    vector,        ///< Vector type.
+    unknown,       ///< Unknown type.
 };
 } // namespace lunaris
