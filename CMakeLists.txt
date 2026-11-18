@@ -38,6 +38,7 @@ add_library(Lunaris STATIC
     src/state.cpp
     src/state_context.cpp
     src/error.cpp
+    src/script_result.cpp
 )
 add_library(Lunaris::Lunaris ALIAS Lunaris)
 

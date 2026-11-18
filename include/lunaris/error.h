@@ -11,9 +11,11 @@ enum class ErrorKind : std::uint8_t {
     compile, ///< Compilation error.
     runtime, ///< Runtime error.
     memory,  ///< Memory allocation error.
+    state,   ///< The State the object belongs to is closed or invalid.
 };
 
 // clang-format off
+
 /// @brief Details about an error that occurred in a Luau state.
 struct ErrorDetails {
     ErrorKind kind = ErrorKind::compile;        ///< The kind of error.
@@ -22,6 +24,7 @@ struct ErrorDetails {
     std::optional<std::uint32_t> lineNumber{};  ///< The line number where the error occurred, if available.
     std::string traceback{};                    ///< The traceback of the error, if available.
 };
+
 // clang-format on
 
 /// @brief An exception that is thrown when an error occurs in a Luau state.

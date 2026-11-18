@@ -1,0 +1,89 @@
+#pragma once
+
+#include "lunaris/type.h"
+
+#include <cstdint>
+#include <memory>
+#include <utility>
+#include <vector>
+
+namespace lunaris {
+
+class State;
+
+namespace detail {
+class StateContext;
+} // namespace detail
+
+/// @brief The values a script returned.
+///
+/// A script can return any number of values (`return 1, "a"`). A ScriptResult
+/// keeps them alive in the Luau state until it is destroyed, so that they can
+/// be inspected afterwards. Indices start at 0.
+///
+/// A ScriptResult shares the context of the State it comes from. It becomes
+/// invalid when that State is closed: size() still reports the number of
+/// values, but type() throws. Destroying it afterwards is safe.
+///
+/// A ScriptResult cannot be copied, only moved. A moved-from object is empty
+/// and may only be destroyed or assigned to.
+class ScriptResult {
+  public:
+    /// @brief Releases the values this object holds. Does nothing if the State
+    /// is already closed. Never throws.
+    ~ScriptResult();
+
+    /// @brief Moves the values of another ScriptResult into this one. The other
+    /// object is empty afterwards.
+    /// @param other The ScriptResult to move from.
+    ScriptResult(ScriptResult &&other) noexcept = default;
+
+    /// @brief Releases the values this object holds and takes over those of
+    /// another ScriptResult. The other object is empty afterwards. Assigning an
+    /// object to itself has no effect.
+    /// @param other The ScriptResult to move from.
+    /// @return A reference to this ScriptResult.
+    ScriptResult &operator=(ScriptResult &&other) noexcept;
+
+    /// @brief Deleted copy constructor. A ScriptResult cannot be copied.
+    ScriptResult(const ScriptResult &other) = delete;
+
+    /// @brief Deleted copy assignment operator. A ScriptResult cannot be
+    /// copied.
+    /// @return Not applicable, the operator is deleted.
+    ScriptResult &operator=(const ScriptResult &other) = delete;
+
+    /// @brief Gets the number of values the script returned.
+    /// @return The number of values. 0 if the script returned nothing.
+    [[nodiscard]] std::uint32_t size() const noexcept;
+
+    /// @brief Gets the type of a returned value.
+    /// @param index The index of the value, starting at 0.
+    /// @return The type of the value at the given index.
+    /// @throws std::out_of_range if the index is not smaller than size().
+    /// @throws Error with ErrorKind::state if the State is closed.
+    [[nodiscard]] Type type(std::uint32_t index) const;
+
+  private:
+    friend class ::lunaris::State;
+
+    /// @brief Creates a ScriptResult. Only a State creates them.
+    /// @param stateContext The context of the State the values live in.
+    /// @param references Registry references to the values, in order.
+    ScriptResult(std::shared_ptr<detail::StateContext> stateContext,
+                 std::vector<int> references) noexcept
+        : m_stateContext(std::move(stateContext)),
+          m_references(std::move(references)) {
+    }
+
+    /// @brief Releases all references, if the State is still open.
+    void release() noexcept;
+
+    /// @brief The context of the State the values live in.
+    std::shared_ptr<detail::StateContext> m_stateContext;
+
+    /// @brief Registry references to the returned values, in order.
+    std::vector<int> m_references;
+};
+
+} // namespace lunaris

@@ -1,11 +1,17 @@
 #pragma once
+
+#include "lunaris/error.h"
+#include "lunaris/script_result.h"
+
 #include <lua.h>
 
 #include <array>
 #include <concepts>
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <span>
+#include <string_view>
 
 namespace lunaris {
 
@@ -102,6 +108,37 @@ class State {
     /// @throws std::bad_alloc if a library could not be opened because of
     /// missing memory. Libraries opened before stay open (basic guarantee).
     void openAllLibraries();
+
+    /// @brief Runs a script and returns the values it returned.
+    ///
+    /// The source is compiled and run in the global scope. The chunk name is
+    /// the name that appears in error messages and tracebacks, Lunaris puts a
+    /// `=` in front of it so that it is shown as given.
+    ///
+    /// The State must not be in a moved-from state. The chunk name must not
+    /// contain a `\0`.
+    ///
+    /// @param source The Luau source code.
+    /// @param chunkName The name of the chunk, shown in error messages.
+    /// @return The values the script returned, in order.
+    /// @throws Error with ErrorKind::compile if the source does not compile.
+    /// @throws Error with ErrorKind::runtime if the script raises an error.
+    /// @throws std::bad_alloc if compiling, loading or running the script runs
+    /// out of memory.
+    ScriptResult script(std::string_view source,
+                        std::string_view chunkName = "script");
+
+    /// @brief Runs a script like script() but reports script errors as a
+    /// value instead of throwing them.
+    ///
+    /// The same preconditions as for script() apply.
+    ///
+    /// @param source The Luau source code.
+    /// @param chunkName The name of the chunk, shown in error messages.
+    /// @return The values the script returned, or the Error that describes why
+    /// the script failed.
+    [[nodiscard]] std::expected<ScriptResult, Error>
+    safeScript(std::string_view source, std::string_view chunkName = "script");
 
   private:
     /// @brief Opens the selected libraries. Does the work for openLibraries(),
