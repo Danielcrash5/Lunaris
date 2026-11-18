@@ -237,8 +237,8 @@ void State::openAllLibraries() {
 
 ScriptResult State::script(std::string_view source,
                            std::string_view chunkName) {
-    lua_State *L = luaState();
-    if (L == nullptr) {
+    lua_State *state = this->luaState();
+    if (state == nullptr) {
         throw Error(ErrorDetails(ErrorKind::state, "State is closed",
                                  std::string(chunkName), std::nullopt, ""));
     }
@@ -257,24 +257,32 @@ ScriptResult State::script(std::string_view source,
         lua_State *state;
         int top;
 
+        StackGuard(lua_State *luaState, int stackTop) noexcept
+            : state(luaState), top(stackTop) {}
+
+        StackGuard(const StackGuard &) = delete;
+        StackGuard &operator=(const StackGuard &) = delete;
+        StackGuard(StackGuard &&) = delete;
+        StackGuard &operator=(StackGuard &&) = delete;
+
         ~StackGuard() noexcept {
             lua_settop(state, top);
         }
     };
 
-    const int stackTopBefore = lua_gettop(L);
-    [[maybe_unused]] const StackGuard stackGuard{L, stackTopBefore};
+    const int stackTopBefore = lua_gettop(state);
+    [[maybe_unused]] const StackGuard stackGuard{state, stackTopBefore};
 
     RuntimeErrorCapture runtimeError;
     runtimeError.details.kind = ErrorKind::runtime;
     runtimeError.details.chunkName = chunkName;
-    lua_pushlightuserdata(L, &runtimeError);
-    lua_pushcclosure(L, runtimeErrorHandler, "lunaris runtime error", 1);
-    const int errorHandlerIndex = lua_absindex(L, -1);
+    lua_pushlightuserdata(state, &runtimeError);
+    lua_pushcclosure(state, runtimeErrorHandler, "lunaris runtime error", 1);
+    const int errorHandlerIndex = lua_absindex(state, -1);
 
-    if (luau_load(L, luauChunkName.c_str(), bytecode.data(), bytecode.size(),
+    if (luau_load(state, luauChunkName.c_str(), bytecode.data(), bytecode.size(),
                   LUA_GLOBALSINDEX) != 0) {
-        const std::string message = errorValueMessage(L, -1);
+        const std::string message = errorValueMessage(state, -1);
         if (message == "not enough memory") {
             throw std::bad_alloc();
         }
@@ -288,29 +296,29 @@ ScriptResult State::script(std::string_view source,
     }
 
     const int callStatus =
-        lua_pcall(L, 0, LUA_MULTRET, errorHandlerIndex);
+        lua_pcall(state, 0, LUA_MULTRET, errorHandlerIndex);
     if (callStatus == LUA_ERRMEM) {
         throw std::bad_alloc();
     }
     if (callStatus != LUA_OK) {
         if (!runtimeError.captured) {
-            runtimeError.details.message = errorValueMessage(L, -1);
+            runtimeError.details.message = errorValueMessage(state, -1);
         }
         throw Error(runtimeError.details);
     }
 
-    lua_remove(L, errorHandlerIndex);
+    lua_remove(state, errorHandlerIndex);
 
-    const int stackTopAfter = lua_gettop(L);
+    const int stackTopAfter = lua_gettop(state);
     const int newValuesCount = stackTopAfter - stackTopBefore;
 
     std::vector<int> references;
     references.reserve(static_cast<std::size_t>(newValuesCount));
     for (int i = 1; i <= newValuesCount; ++i) {
-        references.push_back(lua_ref(L, stackTopBefore + i));
+        references.push_back(lua_ref(state, stackTopBefore + i));
     }
 
-    return ScriptResult(m_context, std::move(references));
+    return {m_context, std::move(references)};
 }
 
 std::expected<ScriptResult, Error>

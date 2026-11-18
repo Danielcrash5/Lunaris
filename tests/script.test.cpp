@@ -111,8 +111,7 @@ TEST(ScriptTest, SafeScriptReturnsRuntimeErrorOnFailure) {
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().kind(), ErrorKind::runtime);
     EXPECT_EQ(result.error().chunkName(), "safe_runtime_case");
-    ASSERT_TRUE(result.error().lineNumber().has_value());
-    EXPECT_EQ(*result.error().lineNumber(), 1U);
+    EXPECT_EQ(result.error().lineNumber(), 1U);
     EXPECT_FALSE(result.error().traceback().empty());
 }
 
