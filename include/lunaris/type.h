@@ -16,6 +16,5 @@ enum class Type : std::uint8_t {
     thread,        ///< Thread type.
     buffer,        ///< Buffer type.
     vector,        ///< Vector type.
-    unknown,       ///< Unknown type.
 };
 } // namespace lunaris

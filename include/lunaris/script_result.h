@@ -1,79 +1,89 @@
 #pragma once
 
-#include "lunaris/detail/state_context.h"
-#include "lunaris/state.h"
 #include "lunaris/type.h"
 
+#include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace lunaris {
-/// @brief Represents the result of executing a script in a Luau state. The
-/// result is a collection of values that were returned by the script. The
-/// ScriptResult object does not own the underlying Luau state, which is managed
-/// by the State object. The ScriptResult object is move-only, meaning it can be
-/// moved but not copied. This is because the ScriptResult object holds a shared
-/// pointer to the StateContext, which manages the lifetime of the underlying
-/// lua_State. Moving a ScriptResult object transfers ownership of the shared
-/// pointer, while copying would create multiple owners of the same lua_State,
-/// which is not allowed.
+
+class State;
+
+namespace detail {
+class StateContext;
+} // namespace detail
+
+/// @brief The values a script returned.
+///
+/// A script can return any number of values (`return 1, "a"`). A ScriptResult
+/// keeps them alive in the Luau state until it is destroyed, so that they can
+/// be inspected afterwards. Indices start at 0.
+///
+/// A ScriptResult shares the context of the State it comes from. It becomes
+/// invalid when that State is closed: size() still reports the number of
+/// values, but type() throws. Destroying it afterwards is safe.
+///
+/// A ScriptResult cannot be copied, only moved. A moved-from object is empty
+/// and may only be destroyed or assigned to.
 class ScriptResult {
   public:
-    /// @brief Destroys the ScriptResult object. The underlying Luau state is
-    /// not closed, as it is managed by the State object.
-    ~ScriptResult() = default;
+    /// @brief Releases the values this object holds. Does nothing if the State
+    /// is already closed. Never throws.
+    ~ScriptResult();
 
-    /// @brief The move constructor for ScriptResult.
+    /// @brief Moves the values of another ScriptResult into this one. The other
+    /// object is empty afterwards.
+    /// @param other The ScriptResult to move from.
     ScriptResult(ScriptResult &&other) noexcept = default;
 
-    /// @brief The move assignment operator for ScriptResult.
-    ScriptResult &operator=(ScriptResult &&other) noexcept = default;
+    /// @brief Releases the values this object holds and takes over those of
+    /// another ScriptResult. The other object is empty afterwards. Assigning an
+    /// object to itself has no effect.
+    /// @param other The ScriptResult to move from.
+    /// @return A reference to this ScriptResult.
+    ScriptResult &operator=(ScriptResult &&other) noexcept;
 
-    /// @brief the copy constructor for ScriptResult.
+    /// @brief Deleted copy constructor. A ScriptResult cannot be copied.
     ScriptResult(const ScriptResult &other) = delete;
 
-    /// @brief The copy assignment operator for ScriptResult.
+    /// @brief Deleted copy assignment operator. A ScriptResult cannot be
+    /// copied.
+    /// @return Not applicable, the operator is deleted.
     ScriptResult &operator=(const ScriptResult &other) = delete;
 
-    /// @brief the number of values in the result.
-    /// @return The number of values in the result.
-    std::uint32_t size() const noexcept;
+    /// @brief Gets the number of values the script returned.
+    /// @return The number of values. 0 if the script returned nothing.
+    [[nodiscard]] std::uint32_t size() const noexcept;
 
-    /// @brief returns the type of the value at the given index in the result.
-    /// The index is 1-based, meaning the first value is at index 1. If the
-    /// index is out of bounds, the function returns Type::unknown. The index is
-    /// 1-based, meaning the first value is at index 1. If the index is out of
-    /// bounds, the function returns Type::unknown.
-    /// @param index The 1-based index of the value in the result.
-    /// @return The type of the value at the given index, or Type::unknown if
-    /// the index is out of bounds.
-    Type type(std::uint32_t index) const noexcept;
+    /// @brief Gets the type of a returned value.
+    /// @param index The index of the value, starting at 0.
+    /// @return The type of the value at the given index.
+    /// @throws std::out_of_range if the index is not smaller than size().
+    /// @throws Error with ErrorKind::state if the State is closed.
+    [[nodiscard]] Type type(std::uint32_t index) const;
 
   private:
     friend class ::lunaris::State;
 
-    /// @brief Constructs a ScriptResult object with the given state context and
-    /// types. This constructor is private and can only be called by the State
-    /// class, which is a friend of ScriptResult. The state context is a shared
-    /// pointer to the StateContext object that manages the lifetime of the
-    /// underlying lua_State. The types vector contains the types of the values
-    /// in the result, in order.
-    ScriptResult(std::shared_ptr<detail::StateContext> state_context,
-                 std::vector<Type> &types) noexcept
-        : m_state_context(std::move(state_context)),
-          m_types(std::move(types)) {};
+    /// @brief Creates a ScriptResult. Only a State creates them.
+    /// @param stateContext The context of the State the values live in.
+    /// @param references Registry references to the values, in order.
+    ScriptResult(std::shared_ptr<detail::StateContext> stateContext,
+                 std::vector<int> references) noexcept
+        : m_stateContext(std::move(stateContext)),
+          m_references(std::move(references)) {
+    }
 
-    /// @brief A shared pointer to the StateContext object that manages the
-    /// lifetime of the underlying lua_State. The shared pointer ensures that
-    /// the StateContext object is not destroyed while the ScriptResult object
-    /// is still alive. The StateContext object is created by the State class
-    /// and is shared among all ScriptResult objects that are created from the
-    /// same State object.
-    std::shared_ptr<detail::StateContext> m_state_context;
+    /// @brief Releases all references, if the State is still open.
+    void release() noexcept;
 
-    /// @brief A vector of types that represents the types of the values in the
-    /// result, in order. The types are stored as Type enum values, which are
-    /// defined in the Type enum.
-    std::vector<Type> m_types;
+    /// @brief The context of the State the values live in.
+    std::shared_ptr<detail::StateContext> m_stateContext;
+
+    /// @brief Registry references to the returned values, in order.
+    std::vector<int> m_references;
 };
+
 } // namespace lunaris

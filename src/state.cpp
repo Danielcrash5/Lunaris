@@ -130,4 +130,15 @@ void State::openLibrariesImpl(std::span<const Library> libraries) {
 void State::openAllLibraries() {
     openByMask(m_context->luaState(), allLibrariesMask);
 }
+
+// Placeholders until the implementation exists.
+ScriptResult State::script(std::string_view /*source*/,
+                           std::string_view /*chunkName*/) {
+    throw std::logic_error("lunaris: State::script is not implemented yet");
+}
+
+std::expected<ScriptResult, Error>
+State::safeScript(std::string_view /*source*/, std::string_view /*chunkName*/) {
+    throw std::logic_error("lunaris: State::safeScript is not implemented yet");
+}
 } // namespace lunaris
