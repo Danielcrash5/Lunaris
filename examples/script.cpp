@@ -4,6 +4,7 @@
 #include <lunaris/state.h>
 
 #include <iostream>
+#include <string>
 
 int main() {
     lunaris::State state;
@@ -13,8 +14,8 @@ int main() {
         state.script("return 2 + 3, 'hello'", "example");
     //! [run script]
 
-    if (result.size() != 2 || result.type(0) != lunaris::Type::number ||
-        result.type(1) != lunaris::Type::string) {
+    if (result.size() != 2 || result.get<double>(0) != 5.0 ||
+        result.get<std::string>(1) != "hello") {
         std::cerr << "Unexpected script results\n";
         return 1;
     }

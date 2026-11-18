@@ -2,8 +2,10 @@
 
 #include "lunaris/type.h"
 
+#include <concepts>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -23,7 +25,7 @@ class StateContext;
 ///
 /// A ScriptResult shares the context of the State it comes from. It becomes
 /// invalid when that State is closed: size() still reports the number of
-/// values, but type() throws. Destroying it afterwards is safe.
+/// values, but type() and get<T>() throw. Destroying it afterwards is safe.
 ///
 /// A ScriptResult cannot be copied, only moved. A moved-from object is empty
 /// and may only be destroyed or assigned to.
@@ -64,8 +66,36 @@ class ScriptResult {
     /// @throws Error with ErrorKind::state if the State is closed.
     [[nodiscard]] Type type(std::uint32_t index) const;
 
+    /// @brief Gets the value at the given index, converted to the requested
+    /// type.
+    /// @tparam T The type to convert the value to. Must be bool, double
+    /// or std::string.
+    /// @param index The index of the value, starting at 0.
+    /// @return The value at the given index, converted to the requested type.
+    /// @throws std::out_of_range if the index is not smaller than size().
+    /// @throws Error with ErrorKind::state if the State is closed.
+    /// @throws Error with ErrorKind::type if the value cannot be converted to
+    /// the requested type.
+    /// @throws std::bad_alloc if returning a string runs out of memory.
+    template <typename T>
+        requires(std::same_as<T, bool> || std::same_as<T, double> ||
+                 std::same_as<T, std::string>)
+    [[nodiscard]] T get(std::uint32_t index) const {
+        if constexpr (std::same_as<T, bool>) {
+            return getBool(index);
+        } else if constexpr (std::same_as<T, double>) {
+            return getDouble(index);
+        } else {
+            return getString(index);
+        }
+    }
+
   private:
     friend class ::lunaris::State;
+
+    [[nodiscard]] bool getBool(std::uint32_t index) const;
+    [[nodiscard]] double getDouble(std::uint32_t index) const;
+    [[nodiscard]] std::string getString(std::uint32_t index) const;
 
     /// @brief Creates a ScriptResult. Only a State creates them.
     /// @param stateContext The context of the State the values live in.

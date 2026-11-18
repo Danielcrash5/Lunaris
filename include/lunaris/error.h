@@ -12,6 +12,7 @@ enum class ErrorKind : std::uint8_t {
     runtime, ///< Runtime error.
     memory,  ///< Memory allocation error.
     state,   ///< The State the object belongs to is closed or invalid.
+    type,    ///< The value is not of the expected type.
 };
 
 // clang-format off

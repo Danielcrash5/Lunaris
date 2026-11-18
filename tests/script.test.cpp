@@ -2,15 +2,25 @@
 #include <lunaris/state.h>
 
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 
 namespace {
 using lunaris::Error;
 using lunaris::ErrorKind;
+using lunaris::ScriptResult;
 using lunaris::State;
 using lunaris::Type;
 } // namespace
+
+template <typename T>
+concept CanGet = requires(const ScriptResult &result) { result.get<T>(0); };
+
+static_assert(CanGet<bool>);
+static_assert(CanGet<double>);
+static_assert(CanGet<std::string>);
+static_assert(!CanGet<int>);
 
 TEST(ScriptTest, ReturnsValuesInOrder) {
     State state;
@@ -50,6 +60,35 @@ TEST(ScriptTest, TypeRejectsAnIndexOutsideTheResult) {
     const auto result = state.script("return 1");
 
     EXPECT_THROW(result.type(1), std::out_of_range);
+}
+
+TEST(ScriptResultTest, GetsSupportedValues) {
+    State state;
+    const auto result = state.script("return true, 4.5, 'hello'");
+
+    ASSERT_EQ(result.size(), 3U);
+    EXPECT_TRUE(result.get<bool>(0));
+    EXPECT_DOUBLE_EQ(result.get<double>(1), 4.5);
+    EXPECT_EQ(result.get<std::string>(2), "hello");
+}
+
+TEST(ScriptResultTest, GetRejectsAValueOfTheWrongType) {
+    State state;
+    const auto result = state.script("return 'hello'");
+
+    try {
+        (void)result.get<double>(0);
+        FAIL() << "get<double>() did not report the type mismatch";
+    } catch (const Error &error) {
+        EXPECT_EQ(error.kind(), ErrorKind::type);
+    }
+}
+
+TEST(ScriptResultTest, GetRejectsAnIndexOutsideTheResult) {
+    State state;
+    const auto result = state.script("return 1.0");
+
+    EXPECT_THROW(result.get<double>(1), std::out_of_range);
 }
 
 TEST(ScriptTest, CompileFailureHasCompileDetails) {
@@ -125,6 +164,13 @@ TEST(ScriptTest, ResultReportsClosedStateAndCanStillBeDestroyed) {
     try {
         (void)result.type(0);
         FAIL() << "type() did not report the closed State";
+    } catch (const Error &error) {
+        EXPECT_EQ(error.kind(), ErrorKind::state);
+    }
+
+    try {
+        (void)result.get<double>(0);
+        FAIL() << "get() did not report the closed State";
     } catch (const Error &error) {
         EXPECT_EQ(error.kind(), ErrorKind::state);
     }

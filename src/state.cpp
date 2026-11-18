@@ -1,4 +1,5 @@
 #include "lunaris/state.h"
+#include "lunaris/detail/stack_guard.h"
 #include "lunaris/detail/state_context.h"
 
 #include <array>
@@ -253,25 +254,8 @@ ScriptResult State::script(std::string_view source,
     std::string luauChunkName = "=";
     luauChunkName.append(chunkName);
 
-    struct StackGuard {
-        lua_State *state;
-        int top;
-
-        StackGuard(lua_State *luaState, int stackTop) noexcept
-            : state(luaState), top(stackTop) {}
-
-        StackGuard(const StackGuard &) = delete;
-        StackGuard &operator=(const StackGuard &) = delete;
-        StackGuard(StackGuard &&) = delete;
-        StackGuard &operator=(StackGuard &&) = delete;
-
-        ~StackGuard() noexcept {
-            lua_settop(state, top);
-        }
-    };
-
-    const int stackTopBefore = lua_gettop(state);
-    [[maybe_unused]] const StackGuard stackGuard{state, stackTopBefore};
+    [[maybe_unused]] const detail::StackGuard stackGuard{state};
+    const int stackTopBefore = stackGuard.getTop();
 
     RuntimeErrorCapture runtimeError;
     runtimeError.details.kind = ErrorKind::runtime;

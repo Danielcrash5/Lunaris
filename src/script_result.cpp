@@ -1,6 +1,7 @@
 #include "lunaris/script_result.h"
 
 #include "lunaris/detail/state_context.h"
+#include "lunaris/detail/stack_guard.h"
 #include "lunaris/error.h"
 
 #include <lua.h>
@@ -39,6 +40,35 @@ Type toType(int luaType) {
         throw std::logic_error("lunaris: unsupported Luau type");
     }
 }
+
+lua_State *requireOpenState(
+    const std::shared_ptr<detail::StateContext> &stateContext) {
+    lua_State *state = stateContext ? stateContext->luaState() : nullptr;
+    if (state == nullptr) {
+        throw Error(ErrorDetails{
+            .kind = ErrorKind::state,
+            .message = "lunaris: the State of this ScriptResult is closed"});
+    }
+    return state;
+}
+
+template <typename T, typename Converter>
+T getReferencedValue(lua_State *state, int reference, int expectedLuaType,
+                     const char *typeErrorMessage, Converter converter) {
+    if (lua_checkstack(state, 1) == 0) {
+        throw std::bad_alloc();
+    }
+    [[maybe_unused]] const detail::StackGuard stackGuard(state);
+
+    // A registry reference is an ID, not a stack index. Push its value first.
+    lua_getref(state, reference);
+    if (lua_type(state, -1) != expectedLuaType) {
+        throw Error(ErrorDetails{
+            .kind = ErrorKind::type,
+            .message = typeErrorMessage});
+    }
+    return converter(state, -1);
+}
 } // namespace
 
 ScriptResult::~ScriptResult() {
@@ -76,6 +106,44 @@ Type ScriptResult::type(std::uint32_t index) const {
     const int luaType = lua_type(luaState, -1);
     lua_pop(luaState, 1);
     return toType(luaType);
+}
+
+bool ScriptResult::getBool(std::uint32_t index) const {
+    if (index >= size()) {
+        throw std::out_of_range("lunaris: ScriptResult index out of range");
+    }
+    lua_State *state = requireOpenState(m_stateContext);
+    return getReferencedValue<bool>(
+        state, m_references[index], LUA_TBOOLEAN, "lunaris: value is not a boolean",
+        [](lua_State *luaState, int stackIndex) {
+            return lua_toboolean(luaState, stackIndex) != 0;
+        });
+}
+
+double ScriptResult::getDouble(std::uint32_t index) const {
+    if (index >= size()) {
+        throw std::out_of_range("lunaris: ScriptResult index out of range");
+    }
+    lua_State *state = requireOpenState(m_stateContext);
+    return getReferencedValue<double>(
+        state, m_references[index], LUA_TNUMBER, "lunaris: value is not a number",
+        [](lua_State *luaState, int stackIndex) {
+            return lua_tonumber(luaState, stackIndex);
+        });
+}
+
+std::string ScriptResult::getString(std::uint32_t index) const {
+    if (index >= size()) {
+        throw std::out_of_range("lunaris: ScriptResult index out of range");
+    }
+    lua_State *state = requireOpenState(m_stateContext);
+    return getReferencedValue<std::string>(
+        state, m_references[index], LUA_TSTRING, "lunaris: value is not a string",
+        [](lua_State *luaState, int stackIndex) {
+            std::size_t length = 0;
+            const char *value = lua_tolstring(luaState, stackIndex, &length);
+            return value == nullptr ? std::string{} : std::string(value, length);
+        });
 }
 
 void ScriptResult::release() noexcept {
