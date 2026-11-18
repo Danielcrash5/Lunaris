@@ -3,9 +3,11 @@
 Dieses Dokument ist der einzige Plan. Es bleibt kurz. Neue Ideen kommen in die
 Später-Liste, nicht in den Plan.
 
-**Nächster Schritt:** `script`, `safeScript` und `ScriptResult` (Tabellenzeile 2):
-erst der Header, dann Tests und Example, dann die Implementierung mit
-Message-Handler und zentraler Fehlerübersetzung.
+**Nächster Schritt:** Globale Variablen und `get<T>` (Tabellenzeile 3): erst
+den API-Vertrag im Header festlegen, dann Tests und Example, dann die
+Implementierung. Zahlen sind `double`, `buffer` wird kopiert und Luau-`vector`
+bleibt beim Luau-Standardtyp. Eigene Vektortypen kommen über die C++-Bindings
+(Tabellenzeile 5).
 
 ## Zielsatz
 
@@ -33,10 +35,11 @@ Speicher, geschützte Globals).
 - Luau ist vendort (`thirdparty/luau`), Version steht in `VERSION.md` dort.
 - Version einmalig in `project(Lunaris VERSION …)`, Release per Git-Tag.
 - Global-Scope ist der Default. Die Sandbox ist ein expliziter Modus.
-- `buffer` kommt in 0.1. Eigene Vektortypen werden über einen Hook
-  eingebunden. Lunaris bleibt beim Luau-Standard (float, 3 Komponenten),
-  wrappt Luaus `vector`-Bibliothek nicht und reicht keine Luau-Build-Optionen
-  durch. Der Kern hängt von keiner Math-Bibliothek ab.
+- `buffer` kommt in 0.1. Lunaris verwendet Luau-`vector` mit dem Standardtyp
+  (float, 3 Komponenten), wrappt die `vector`-Bibliothek nicht und reicht keine
+  Luau-Build-Optionen durch. Nutzer binden eigene Vektortypen (zum Beispiel
+  GLM-Typen) selbst über die C++-Bindings API aus Tabellenzeile 5 ein. Der Kern
+  hängt von keiner Math-Bibliothek ab.
 - Handles halten einen gemeinsamen Kontext (`std::shared_ptr`), den auch der
   `State` besitzt. `State` schließt den `lua_State` explizit über den Kontext.
   Handles werden mit dem Schließen des States ungültig. Ihr Zugriff wirft dann
@@ -78,7 +81,7 @@ Namen sind vorläufig.
 |----|------|---------|-----------------|
 | 1 | `state`, `open_libraries` | `State`, `openLibraries(Library…)`, `openAllLibraries()` | kein `io`, `os` stark beschnitten, dafür `buffer` und `vector`. Libraries werden mit Name aufgerufen wie in `luaL_openlibs`. `luaL_sandbox` muss danach laufen |
 | 2 | `script`, `safe_script` | `script`, `safeScript` | Compiler erzeugt Bytecode, Compile-Fehler stecken im Bytecode. Intern getrennt in compile, load und run, öffentlich erst bei Bedarf (Bytecode-Cache). Fremd-Bytecode nur als „trusted“ |
-| 3 | Variablen, `get<T>` | `state["x"]`, `get<T>` | Zahlen sind nur `double`, `vector` über Hook, `buffer` als Kopie |
+| 3 | Variablen, `get<T>` | `state["x"]`, `get<T>` | Zahlen sind nur `double`, Luau-`vector` bleibt Standardtyp, `buffer` als Kopie; eigene Vektortypen über C++-Bindings (Zeile 5) |
 | 4 | Lua-Funktionen aufrufen | `Function`, `safeCall` | Traceback im Message-Handler, Fehlerwerte sind nicht nur Strings |
 | 5 | C++-Funktionen binden | `setFunction` | `catch(...)` an der Grenze, `lua_error` erst nach dem try/catch |
 | 6 | Tabellen | `Table` | Zugriffe können Metamethoden auslösen oder an readonly scheitern |
@@ -108,12 +111,14 @@ Reihenfolge: Zeilen 1–6 sind 0.1, danach 7, 8, 9.
 - [x] ASan-/UBSan-Job auf Linux
 - [x] Tabellenzeile 1 (`State`, `openLibraries`, `openAllLibraries`)
 - [x] `Error` (`kind`, Meldung, Chunk, Zeile, Traceback) mit Tests
-- [ ] Tabellenzeilen 2–6, jede mit Example, Test und Doxygen-Kommentar
+- [x] Tabellenzeile 2 (`script`, `safeScript`, `ScriptResult::size/type`) mit
+      Example, Test und Doxygen-Kommentar
+- [ ] Tabellenzeilen 3–6, jede mit Example, Test und Doxygen-Kommentar
 - [ ] Roundtrip-Tests: C++-Exception durch einen Luau-Frame, Luau-Fehler nach
       C++, nicht-String-Fehlerwert
-- [ ] `State` hält einen gemeinsamen Kontext, ein Handle erkennt das Ende des
+- [x] `State` hält einen gemeinsamen Kontext, ein Handle erkennt das Ende des
       States
-- [ ] Handle-Test: Zugriff nach dem Ende des States wirft eine `Error`, der
+- [x] Handle-Test: Zugriff nach dem Ende des States wirft eine `Error`, der
       Destruktor bleibt still
 - [x] `.clang-tidy` aktiv, eigener CI-Job
 - [x] Doxygen ohne Warnungen, eigener CI-Job
