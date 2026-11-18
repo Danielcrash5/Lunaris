@@ -5,6 +5,7 @@ add_executable(LunarisTests
     state_context.test.cpp
     libraries.test.cpp
     error.test.cpp
+    script.test.cpp
 )
 
 target_link_libraries(LunarisTests PRIVATE Lunaris::Lunaris GTest::gtest_main)

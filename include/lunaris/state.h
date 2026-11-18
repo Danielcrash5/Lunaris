@@ -123,7 +123,8 @@ class State {
     /// @return The values the script returned, in order.
     /// @throws Error with ErrorKind::compile if the source does not compile.
     /// @throws Error with ErrorKind::runtime if the script raises an error.
-    /// @throws Error with ErrorKind::memory if the State runs out of memory.
+    /// @throws std::bad_alloc if compiling, loading or running the script runs
+    /// out of memory.
     ScriptResult script(std::string_view source,
                         std::string_view chunkName = "script");
 

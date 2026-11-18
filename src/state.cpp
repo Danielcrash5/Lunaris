@@ -2,12 +2,17 @@
 #include "lunaris/detail/state_context.h"
 
 #include <array>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <new>
+#include <optional>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
+#include <Luau/Compiler.h>
 #include <lua.h>
 #include <lualib.h>
 
@@ -74,6 +79,105 @@ void openByMask(lua_State *state, std::uint16_t mask) {
         throw;
     }
 }
+
+std::string errorValueMessage(lua_State *state, int index) {
+    switch (lua_type(state, index)) {
+    case LUA_TSTRING:
+    case LUA_TNUMBER: {
+        std::size_t length = 0;
+        const char *value = lua_tolstring(state, index, &length);
+        return value == nullptr ? std::string{}
+                                : std::string(value, length);
+    }
+    case LUA_TBOOLEAN:
+        return lua_toboolean(state, index) != 0 ? "true" : "false";
+    default:
+        return std::string("error object of type ") +
+               luaL_typename(state, index);
+    }
+}
+
+std::optional<std::uint32_t>
+compileLineNumber(std::string_view message, std::string_view chunkName) {
+    // Luau truncates displayed chunk names to LUA_IDSIZE - 1 characters.
+    const std::string_view displayedName =
+        chunkName.size() < LUA_IDSIZE ? chunkName
+                                     : chunkName.substr(0, LUA_IDSIZE - 1);
+    if (!message.starts_with(displayedName) ||
+        message.size() <= displayedName.size() ||
+        message[displayedName.size()] != ':') {
+        return std::nullopt;
+    }
+
+    const std::size_t lineStart = displayedName.size() + 1;
+    std::size_t lineEnd = lineStart;
+    while (lineEnd < message.size() && message[lineEnd] >= '0' &&
+           message[lineEnd] <= '9') {
+        ++lineEnd;
+    }
+    if (lineEnd == lineStart || lineEnd >= message.size() ||
+        message[lineEnd] != ':') {
+        return std::nullopt;
+    }
+
+    std::uint32_t line = 0;
+    const auto [parsedEnd, error] =
+        std::from_chars(message.data() + lineStart,
+                        message.data() + lineEnd, line);
+    if (error != std::errc{} || parsedEnd != message.data() + lineEnd) {
+        return std::nullopt;
+    }
+    return line;
+}
+
+struct RuntimeErrorCapture {
+    ErrorDetails details;
+    bool captured = false;
+};
+
+int runtimeErrorHandler(lua_State *state) {
+    auto *capture = static_cast<RuntimeErrorCapture *>(
+        lua_touserdata(state, lua_upvalueindex(1)));
+    if (capture != nullptr) {
+        capture->details.kind = ErrorKind::runtime;
+        capture->details.message = errorValueMessage(state, 1);
+
+        int tracebackStartLevel = 1;
+        for (int level = 1;; ++level) {
+            lua_Debug frame{};
+            if (lua_getinfo(state, level, "sl", &frame) == 0) {
+                break;
+            }
+            if (frame.what != nullptr && std::strcmp(frame.what, "C") != 0) {
+                if (frame.source != nullptr) {
+                    std::string_view sourceName(frame.source);
+                    if (sourceName.starts_with('=')) {
+                        sourceName.remove_prefix(1);
+                    }
+                    capture->details.chunkName.assign(sourceName);
+                }
+                if (frame.currentline > 0) {
+                    capture->details.lineNumber =
+                        static_cast<std::uint32_t>(frame.currentline);
+                }
+                tracebackStartLevel = level;
+                break;
+            }
+        }
+
+        luaL_traceback(state, state, nullptr, tracebackStartLevel);
+        std::size_t tracebackLength = 0;
+        const char *traceback = lua_tolstring(state, -1, &tracebackLength);
+        if (traceback != nullptr) {
+            capture->details.traceback.assign(traceback, tracebackLength);
+        }
+        lua_pop(state, 1);
+        capture->captured = true;
+    }
+
+    lua_pushvalue(state, 1);
+    return 1;
+}
 } // namespace
 
 State::State() : m_context(std::make_shared<detail::StateContext>()) {
@@ -131,14 +235,90 @@ void State::openAllLibraries() {
     openByMask(m_context->luaState(), allLibrariesMask);
 }
 
-// Placeholders until the implementation exists.
-ScriptResult State::script(std::string_view /*source*/,
-                           std::string_view /*chunkName*/) {
-    throw std::logic_error("lunaris: State::script is not implemented yet");
+ScriptResult State::script(std::string_view source,
+                           std::string_view chunkName) {
+    lua_State *L = luaState();
+    if (L == nullptr) {
+        throw Error(ErrorDetails(ErrorKind::state, "State is closed",
+                                 std::string(chunkName), std::nullopt, ""));
+    }
+
+    if (chunkName.find('\0') != std::string_view::npos) {
+        throw std::invalid_argument("chunkName must not contain a null byte");
+    }
+
+    std::string bytecode = Luau::compile(
+        std::string(source), Luau::CompileOptions{}, Luau::ParseOptions{});
+
+    std::string luauChunkName = "=";
+    luauChunkName.append(chunkName);
+
+    struct StackGuard {
+        lua_State *state;
+        int top;
+
+        ~StackGuard() noexcept {
+            lua_settop(state, top);
+        }
+    };
+
+    const int stackTopBefore = lua_gettop(L);
+    [[maybe_unused]] const StackGuard stackGuard{L, stackTopBefore};
+
+    RuntimeErrorCapture runtimeError;
+    runtimeError.details.kind = ErrorKind::runtime;
+    runtimeError.details.chunkName = chunkName;
+    lua_pushlightuserdata(L, &runtimeError);
+    lua_pushcclosure(L, runtimeErrorHandler, "lunaris runtime error", 1);
+    const int errorHandlerIndex = lua_absindex(L, -1);
+
+    if (luau_load(L, luauChunkName.c_str(), bytecode.data(), bytecode.size(),
+                  LUA_GLOBALSINDEX) != 0) {
+        const std::string message = errorValueMessage(L, -1);
+        if (message == "not enough memory") {
+            throw std::bad_alloc();
+        }
+
+        ErrorDetails details;
+        details.kind = ErrorKind::compile;
+        details.message = message;
+        details.chunkName = chunkName;
+        details.lineNumber = compileLineNumber(message, chunkName);
+        throw Error(details);
+    }
+
+    const int callStatus =
+        lua_pcall(L, 0, LUA_MULTRET, errorHandlerIndex);
+    if (callStatus == LUA_ERRMEM) {
+        throw std::bad_alloc();
+    }
+    if (callStatus != LUA_OK) {
+        if (!runtimeError.captured) {
+            runtimeError.details.message = errorValueMessage(L, -1);
+        }
+        throw Error(runtimeError.details);
+    }
+
+    lua_remove(L, errorHandlerIndex);
+
+    const int stackTopAfter = lua_gettop(L);
+    const int newValuesCount = stackTopAfter - stackTopBefore;
+
+    std::vector<int> references;
+    references.reserve(static_cast<std::size_t>(newValuesCount));
+    for (int i = 1; i <= newValuesCount; ++i) {
+        references.push_back(lua_ref(L, stackTopBefore + i));
+    }
+
+    return ScriptResult(m_context, std::move(references));
 }
 
 std::expected<ScriptResult, Error>
-State::safeScript(std::string_view /*source*/, std::string_view /*chunkName*/) {
-    throw std::logic_error("lunaris: State::safeScript is not implemented yet");
+State::safeScript(std::string_view source, std::string_view chunkName) {
+    try {
+        return script(source, chunkName);
+    } catch (const Error &error) {
+        return std::unexpected(error);
+    }
 }
 } // namespace lunaris

@@ -13,3 +13,4 @@ function(lunaris_add_example name)
 endfunction()
 
 lunaris_add_example(open_libraries)
+lunaris_add_example(script)
